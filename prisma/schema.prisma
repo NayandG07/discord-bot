@@ -1,0 +1,641 @@
+// DevGuild — Production Prisma Schema
+// PostgreSQL 16 + Prisma ORM
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum RankTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+  DIAMOND
+  MASTER
+  GRANDMASTER
+}
+
+enum GuildRole {
+  MEMBER
+  MODERATOR
+  ADMIN
+}
+
+enum ProblemDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum TopicCategory {
+  ARRAYS
+  STRINGS
+  TREES
+  GRAPHS
+  DYNAMIC_PROGRAMMING
+  GREEDY
+  BINARY_SEARCH
+  BACKTRACKING
+  MIXED
+  OTHER
+}
+
+enum XpSource {
+  PROBLEM_SOLVE
+  STREAK_BONUS
+  CHALLENGE_WIN
+  CHALLENGE_PARTICIPATION
+  CHALLENGE_MVP
+  BOSS_BATTLE
+  BOSS_BATTLE_MVP
+  ACHIEVEMENT_UNLOCK
+  ADMIN_ADJUSTMENT
+  SEASON_REWARD
+}
+
+enum ChallengeFormat {
+  ONE_V_ONE
+  TWO_V_TWO
+  THREE_V_THREE
+  CUSTOM_TEAMS
+}
+
+enum ChallengeStatus {
+  CREATED
+  INVITED
+  LOBBY_READY
+  VOTING
+  ACTIVE
+  EVALUATING
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+enum ChallengeIntensity {
+  CASUAL
+  COMPETITIVE
+  HARDCORE
+}
+
+enum ParticipantStatus {
+  INVITED
+  ACCEPTED
+  DECLINED
+}
+
+enum TeamRole {
+  LEADER
+  CO_LEADER
+  MEMBER
+}
+
+enum ContestType {
+  WEEKLY
+  BIWEEKLY
+}
+
+enum BossType {
+  WEEKLY_BOSS
+  MEGA_BOSS
+}
+
+enum AchievementCategory {
+  PROGRESSION
+  CONSISTENCY
+  CHALLENGES
+  CONTESTS
+  TOPICS
+  DIFFICULTY
+}
+
+enum AchievementTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+}
+
+enum SeasonStatus {
+  UPCOMING
+  ACTIVE
+  FROZEN
+  ARCHIVED
+}
+
+enum RecapType {
+  DAILY
+  WEEKLY
+  MONTHLY_WRAPPED
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  GUILD_ADMIN
+  MODERATOR
+}
+
+// ==========================================
+// MODELS
+// ==========================================
+
+model User {
+  id               String    @id @default(uuid()) @db.Uuid
+  discordId        String    @unique @db.VarChar(32)
+  username         String    @db.VarChar(64)
+  discriminator    String?   @db.VarChar(8)
+  avatarUrl        String?   @db.Text
+  reliabilityScore Decimal   @default(100.00) @db.Decimal(5, 2)
+  currentStreak    Int       @default(0)
+  longestStreak    Int       @default(0)
+  lastActiveAt     DateTime? @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  leetCodeProfile          LeetCodeProfile?
+  guildMemberships         GuildMember[]
+  activities               Activity[]
+  xpTransactions           XPTransactions[]
+  challengeParticipations  ChallengeParticipant[]
+  challengeVotes           ChallengeVote[]
+  createdChallenges        Challenge[]                 @relation("CreatedChallenges")
+  teamMemberships          TeamMember[]
+  ledTeams                 Team[]                      @relation("LedTeams")
+  bossBattleParticipations BossBattleParticipant[]
+  userAchievements         UserAchievement[]
+  seasonSnapshots          SeasonLeaderboardSnapshot[]
+  recaps                   Recap[]
+
+  @@index([discordId])
+  @@index([lastActiveAt])
+  @@map("users")
+}
+
+model LeetCodeProfile {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @unique @db.Uuid
+  username          String    @unique @db.VarChar(64)
+  realName          String?   @db.VarChar(128)
+  aboutMe           String?   @db.Text
+  avatar            String?   @db.Text
+  ranking           Int?
+  totalSolved       Int       @default(0)
+  easySolved        Int       @default(0)
+  mediumSolved      Int       @default(0)
+  hardSolved        Int       @default(0)
+  contestRating     Decimal?  @db.Decimal(6, 2)
+  contestGlobalRank Int?
+  isVerified        Boolean   @default(false)
+  verificationToken String?   @db.VarChar(64)
+  lastSyncedAt      DateTime? @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([username])
+  @@index([lastSyncedAt])
+  @@map("leetcode_profiles")
+}
+
+model Guild {
+  id             String   @id @default(uuid()) @db.Uuid
+  discordGuildId String   @unique @db.VarChar(32)
+  name           String   @db.VarChar(128)
+  iconUrl        String?  @db.Text
+  botJoinedAt    DateTime @default(now()) @db.Timestamptz(6)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  members            GuildMember[]
+  notificationConfig NotificationConfig?
+  xpConfig           XpConfig?
+  challenges         Challenge[]
+  teams              Team[]
+  bossBattles        BossBattle[]
+  seasonSnapshots    SeasonLeaderboardSnapshot[]
+  recaps             Recap[]
+  xpTransactions     XPTransactions[]
+
+  @@index([discordGuildId])
+  @@map("guilds")
+}
+
+model GuildMember {
+  id            String    @id @default(uuid()) @db.Uuid
+  guildId       String    @db.Uuid
+  userId        String    @db.Uuid
+  guildXp       BigInt    @default(0)
+  guildRank     RankTier  @default(BRONZE)
+  joinedGuildAt DateTime  @default(now()) @db.Timestamptz(6)
+  role          GuildRole @default(MEMBER)
+  isMuted       Boolean   @default(false)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, userId])
+  @@index([guildId, guildXp(sort: Desc)])
+  @@map("guild_members")
+}
+
+model XpConfig {
+  id                 String   @id @default(uuid()) @db.Uuid
+  guildId            String?  @unique @db.Uuid
+  baseEasyXp         Int      @default(10)
+  baseMediumXp       Int      @default(30)
+  baseHardXp         Int      @default(75)
+  easyTier1Threshold Int      @default(3)
+  easyTier2Threshold Int      @default(6)
+  easyTier3Threshold Int      @default(10)
+  easyFloorPercent   Int      @default(25)
+  streakBonusRate    Decimal  @default(0.020) @db.Decimal(4, 3)
+  streakBonusCap     Decimal  @default(0.500) @db.Decimal(4, 3)
+  createdAt          DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  guild Guild? @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@map("xp_configs")
+}
+
+model NotificationConfig {
+  id                    String   @id @default(uuid()) @db.Uuid
+  guildId               String   @unique @db.Uuid
+  activityChannelId     String?  @db.VarChar(32)
+  recapChannelId        String?  @db.VarChar(32)
+  bossBattleChannelId   String?  @db.VarChar(32)
+  challengeChannelId    String?  @db.VarChar(32)
+  enableActivityAlerts  Boolean  @default(true)
+  enableDailyRecaps     Boolean  @default(true)
+  enableWeeklyRecaps    Boolean  @default(true)
+  enableBossAlerts      Boolean  @default(true)
+  enableChallengeAlerts Boolean  @default(true)
+  createdAt             DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@map("notification_configs")
+}
+
+model Activity {
+  id                   String            @id @default(uuid()) @db.Uuid
+  userId               String            @db.Uuid
+  leetCodeSubmissionId String            @db.VarChar(64)
+  problemTitle         String            @db.VarChar(255)
+  problemSlug          String            @db.VarChar(255)
+  difficulty           ProblemDifficulty
+  topicTags            String[]          @default([])
+  primaryTopic         TopicCategory     @default(OTHER)
+  submissionTimestamp  DateTime          @db.Timestamptz(6)
+  runtimeMs            Int?
+  memoryBytes          BigInt?
+  createdAt            DateTime          @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  xpTransactions XPTransactions[]
+
+  @@unique([userId, leetCodeSubmissionId])
+  @@index([userId, submissionTimestamp(sort: Desc)])
+  @@index([primaryTopic])
+  @@index([problemSlug])
+  @@map("activities")
+}
+
+model XPTransactions {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @db.Uuid
+  guildId         String?  @db.Uuid
+  activityId      String?  @db.Uuid
+  challengeId     String?  @db.Uuid
+  bossBattleId    String?  @db.Uuid
+  source          XpSource
+  baseAmount      Int
+  multiplier      Decimal  @default(1.00) @db.Decimal(4, 2)
+  finalAmount     Int
+  diminishingRate Decimal  @default(1.00) @db.Decimal(4, 2)
+  reason          String?  @db.VarChar(255)
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  guild      Guild?      @relation(fields: [guildId], references: [id], onDelete: SetNull)
+  activity   Activity?   @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  challenge  Challenge?  @relation(fields: [challengeId], references: [id], onDelete: SetNull)
+  bossBattle BossBattle? @relation(fields: [bossBattleId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([guildId, createdAt(sort: Desc)])
+  @@map("xp_transactions")
+}
+
+model Challenge {
+  id                String             @id @default(uuid()) @db.Uuid
+  guildId           String             @db.Uuid
+  creatorId         String             @db.Uuid
+  format            ChallengeFormat
+  status            ChallengeStatus    @default(CREATED)
+  winningTeamNumber Int?
+  selectedTopic     TopicCategory?
+  durationHours     Int                @default(24)
+  intensity         ChallengeIntensity @default(CASUAL)
+  votingStartsAt    DateTime?          @db.Timestamptz(6)
+  votingEndsAt      DateTime?          @db.Timestamptz(6)
+  startsAt          DateTime?          @db.Timestamptz(6)
+  endsAt            DateTime?          @db.Timestamptz(6)
+  discordMessageId  String?            @db.VarChar(32)
+  createdAt         DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  guild          Guild                  @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  creator        User                   @relation("CreatedChallenges", fields: [creatorId], references: [id], onDelete: Restrict)
+  participants   ChallengeParticipant[]
+  votes          ChallengeVote[]
+  xpTransactions XPTransactions[]
+
+  @@index([guildId, status])
+  @@index([startsAt, endsAt])
+  @@map("challenges")
+}
+
+model ChallengeParticipant {
+  id                 String            @id @default(uuid()) @db.Uuid
+  challengeId        String            @db.Uuid
+  userId             String            @db.Uuid
+  teamNumber         Int
+  status             ParticipantStatus @default(INVITED)
+  contributionPoints Decimal           @default(0.00) @db.Decimal(8, 2)
+  problemsSolved     Int               @default(0)
+  isMvp              Boolean           @default(false)
+  createdAt          DateTime          @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([challengeId, userId])
+  @@map("challenge_participants")
+}
+
+model ChallengeVote {
+  id                String              @id @default(uuid()) @db.Uuid
+  challengeId       String              @db.Uuid
+  userId            String              @db.Uuid
+  topicVote         TopicCategory?
+  durationVoteHours Int?
+  intensityVote     ChallengeIntensity?
+  createdAt         DateTime            @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([challengeId, userId])
+  @@map("challenge_votes")
+}
+
+model Team {
+  id               String   @id @default(uuid()) @db.Uuid
+  guildId          String   @db.Uuid
+  leaderId         String   @db.Uuid
+  name             String   @db.VarChar(64)
+  tag              String   @db.VarChar(6)
+  avatarUrl        String?  @db.Text
+  totalXp          BigInt   @default(0)
+  wins             Int      @default(0)
+  losses           Int      @default(0)
+  reliabilityScore Decimal  @default(100.00) @db.Decimal(5, 2)
+  currentStreak    Int      @default(0)
+  createdAt        DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  guild   Guild        @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  leader  User         @relation("LedTeams", fields: [leaderId], references: [id], onDelete: Restrict)
+  members TeamMember[]
+
+  @@unique([guildId, name])
+  @@unique([guildId, tag])
+  @@index([guildId, totalXp(sort: Desc)])
+  @@map("teams")
+}
+
+model TeamMember {
+  id       String   @id @default(uuid()) @db.Uuid
+  teamId   String   @db.Uuid
+  userId   String   @db.Uuid
+  role     TeamRole @default(MEMBER)
+  joinedAt DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@map("team_members")
+}
+
+model Contest {
+  id                String      @id @default(uuid()) @db.Uuid
+  leetCodeContestId String      @unique @db.VarChar(64)
+  title             String      @db.VarChar(128)
+  type              ContestType
+  startTime         DateTime    @db.Timestamptz(6)
+  endTime           DateTime    @db.Timestamptz(6)
+  isProcessed       Boolean     @default(false)
+  createdAt         DateTime    @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  bossBattles BossBattle[]
+
+  @@index([startTime, endTime])
+  @@map("contests")
+}
+
+model BossBattle {
+  id                    String   @id @default(uuid()) @db.Uuid
+  guildId               String   @db.Uuid
+  contestId             String   @db.Uuid
+  bossType              BossType
+  bossName              String   @db.VarChar(64)
+  totalHealthPoints     Int
+  currentHealthPoints   Int
+  isDefeated            Boolean  @default(false)
+  announcementMessageId String?  @db.VarChar(32)
+  createdAt             DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  guild          Guild                   @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  contest        Contest                 @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  participants   BossBattleParticipant[]
+  xpTransactions XPTransactions[]
+
+  @@unique([guildId, contestId])
+  @@map("boss_battles")
+}
+
+model BossBattleParticipant {
+  id             String   @id @default(uuid()) @db.Uuid
+  bossBattleId   String   @db.Uuid
+  userId         String   @db.Uuid
+  problemsSolved Int      @default(0)
+  damageDealt    Int      @default(0)
+  contestRank    Int?
+  xpAwarded      Int      @default(0)
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  bossBattle BossBattle @relation(fields: [bossBattleId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([bossBattleId, userId])
+  @@map("boss_battle_participants")
+}
+
+model Achievement {
+  id           String              @id @default(uuid()) @db.Uuid
+  code         String              @unique @db.VarChar(64)
+  name         String              @db.VarChar(128)
+  description  String              @db.Text
+  category     AchievementCategory
+  tier         AchievementTier     @default(BRONZE)
+  iconUrl      String?             @db.Text
+  xpReward     Int                 @default(50)
+  criteriaJson Json
+  createdAt    DateTime            @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  userAchievements UserAchievement[]
+
+  @@index([code])
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @db.Uuid
+  achievementId String   @db.Uuid
+  unlockedAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@index([userId, unlockedAt])
+  @@map("user_achievements")
+}
+
+model Season {
+  id        String       @id @default(uuid()) @db.Uuid
+  number    Int          @unique
+  name      String       @db.VarChar(64)
+  startsAt  DateTime     @db.Timestamptz(6)
+  endsAt    DateTime     @db.Timestamptz(6)
+  status    SeasonStatus @default(UPCOMING)
+  createdAt DateTime     @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  snapshots SeasonLeaderboardSnapshot[]
+
+  @@index([status])
+  @@map("seasons")
+}
+
+model SeasonLeaderboardSnapshot {
+  id                  String   @id @default(uuid()) @db.Uuid
+  seasonId            String   @db.Uuid
+  guildId             String   @db.Uuid
+  userId              String   @db.Uuid
+  finalRankPosition   Int
+  finalRankTier       RankTier
+  finalXp             BigInt
+  totalProblemsSolved Int
+  challengesWon       Int
+  createdAt           DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  season Season @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  guild  Guild  @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([seasonId, guildId, userId])
+  @@map("season_leaderboard_snapshots")
+}
+
+model Recap {
+  id           String    @id @default(uuid()) @db.Uuid
+  guildId      String?   @db.Uuid
+  userId       String?   @db.Uuid
+  type         RecapType
+  periodStart  DateTime  @db.Timestamptz(6)
+  periodEnd    DateTime  @db.Timestamptz(6)
+  metricsJson  Json
+  cardImageUrl String?   @db.Text
+  createdAt    DateTime  @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  guild Guild? @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  user  User?  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, periodStart, periodEnd])
+  @@index([userId, periodStart, periodEnd])
+  @@map("recaps")
+}
+
+model AdminUser {
+  id        String    @id @default(uuid()) @db.Uuid
+  discordId String    @unique @db.VarChar(32)
+  username  String    @db.VarChar(64)
+  role      AdminRole @default(GUILD_ADMIN)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  auditLogs AuditLog[]
+
+  @@map("admin_users")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  adminUserId  String   @db.Uuid
+  action       String   @db.VarChar(128)
+  targetEntity String   @db.VarChar(64)
+  targetId     String?  @db.VarChar(64)
+  beforeState  Json?
+  afterState   Json?
+  ipAddress    String?  @db.VarChar(45)
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relationships
+  adminUser AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Restrict)
+
+  @@index([adminUserId, createdAt])
+  @@index([action])
+  @@map("audit_logs")
+}

@@ -1,0 +1,139 @@
+version: '3.9'
+
+services:
+  # ------------------------------------------
+  # 1. PostgreSQL 16 Database
+  # ------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: devguild_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-devguild_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devguild_secure_pass_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-devguild_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-devguild_user} -d ${POSTGRES_DB:-devguild_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - devguild_network
+
+  # ------------------------------------------
+  # 2. Redis 7 Cache & Task Broker
+  # ------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: devguild_redis
+    restart: always
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redis_secure_pass_2026}", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_pass_2026}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - devguild_network
+
+  # ------------------------------------------
+  # 3. NestJS REST API Server
+  # ------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: devguild_api
+    restart: always
+    command: ["sh", "-c", "npx prisma migrate deploy && node dist/main"]
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-devguild_user}:${POSTGRES_PASSWORD:-devguild_secure_pass_2026}@postgres:5432/${POSTGRES_DB:-devguild_db}?schema=public"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secure_pass_2026}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - devguild_network
+
+  # ------------------------------------------
+  # 4. Discord Bot Client & Gateway
+  # ------------------------------------------
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: devguild_bot
+    restart: always
+    command: ["node", "dist/bot-main"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-devguild_user}:${POSTGRES_PASSWORD:-devguild_secure_pass_2026}@postgres:5432/${POSTGRES_DB:-devguild_db}?schema=public"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secure_pass_2026}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    networks:
+      - devguild_network
+
+  # ------------------------------------------
+  # 5. BullMQ Background Task Workers
+  # ------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: devguild_worker
+    restart: always
+    command: ["node", "dist/workers/main-worker"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-devguild_user}:${POSTGRES_PASSWORD:-devguild_secure_pass_2026}@postgres:5432/${POSTGRES_DB:-devguild_db}?schema=public"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secure_pass_2026}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - devguild_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  devguild_network:
+    driver: bridge
