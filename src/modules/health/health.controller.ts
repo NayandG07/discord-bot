@@ -62,4 +62,10 @@ export class HealthController {
 
     return res.status(httpStatus).json(status);
   }
+
+  @Get('ping')
+  @ApiOperation({ summary: 'Ultra-lightweight ping endpoint for uptime monitors' })
+  ping(@Res() res: Response) {
+    return res.status(HttpStatus.OK).send('OK');
+  }
 }
