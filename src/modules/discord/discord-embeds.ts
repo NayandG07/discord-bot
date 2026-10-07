@@ -52,7 +52,7 @@ export class DiscordEmbeds {
         },
         {
           name: 'Streak Stats',
-          value: `🔥 Current: **${user.currentStreak} Days**\n⚡ Longest: **${user.longestStreak} Days**`,
+          value: `🔥 Current: **${user.currentStreak} Days**\n⚡ Max Streak: **${user.longestStreak} Days**`,
           inline: true,
         },
         {
@@ -62,7 +62,7 @@ export class DiscordEmbeds {
         },
         {
           name: 'Contest Metrics',
-          value: `Rating: **${profile.contestRating ? Number(profile.contestRating).toFixed(0) : 'Unranked'}**\nRank: **${profile.contestGlobalRank ? '#' + profile.contestGlobalRank : 'N/A'}**`,
+          value: `Rating: **${profile.contestRating ? Math.round(Number(profile.contestRating)).toLocaleString() : 'Unranked'}**\nRank: **${profile.contestGlobalRank ? '#' + Number(profile.contestGlobalRank).toLocaleString() : 'N/A'}**`,
           inline: true,
         },
       )

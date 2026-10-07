@@ -754,10 +754,52 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
           }
         }
 
-        await this.prisma.leetCodeProfile.update({
-          where: { id: user.leetCodeProfile.id },
-          data: { lastSyncedAt: new Date() },
-        });
+        // Refresh full LeetCode stats & contest metrics
+        try {
+          const [liveProfile, contestRanking] = await Promise.all([
+            this.leetcode.fetchUserProfile(user.leetCodeProfile.username).catch(() => null),
+            this.leetcode.fetchContestRanking(user.leetCodeProfile.username).catch(() => null),
+          ]);
+
+          if (liveProfile) {
+            const allCount = liveProfile.submitStats.acSubmissionNum.find((s) => s.difficulty === 'All')?.count || 0;
+            const easyCount = liveProfile.submitStats.acSubmissionNum.find((s) => s.difficulty === 'Easy')?.count || 0;
+            const medCount = liveProfile.submitStats.acSubmissionNum.find((s) => s.difficulty === 'Medium')?.count || 0;
+            const hardCount = liveProfile.submitStats.acSubmissionNum.find((s) => s.difficulty === 'Hard')?.count || 0;
+
+            await this.prisma.leetCodeProfile.update({
+              where: { id: user.leetCodeProfile.id },
+              data: {
+                totalSolved: allCount,
+                easySolved: easyCount,
+                mediumSolved: medCount,
+                hardSolved: hardCount,
+                ranking: liveProfile.ranking,
+                avatar: liveProfile.userAvatar || undefined,
+                contestRating: contestRanking?.rating ? Math.round(contestRanking.rating) : undefined,
+                contestGlobalRank: contestRanking?.globalRanking || undefined,
+                lastSyncedAt: new Date(),
+              },
+            });
+
+            if (liveProfile.streak) {
+              await this.prisma.user.update({
+                where: { id: user.id },
+                data: { longestStreak: Math.max(user.longestStreak, liveProfile.streak) },
+              });
+            }
+          } else {
+            await this.prisma.leetCodeProfile.update({
+              where: { id: user.leetCodeProfile.id },
+              data: { lastSyncedAt: new Date() },
+            });
+          }
+        } catch {
+          await this.prisma.leetCodeProfile.update({
+            where: { id: user.leetCodeProfile.id },
+            data: { lastSyncedAt: new Date() },
+          });
+        }
 
         if (newCount > 0) {
           await interaction.editReply({
@@ -778,7 +820,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       await interaction.deferReply();
       const targetUser = interaction.options.getUser('user') || interaction.user;
 
-      const user = await this.prisma.user.findUnique({
+      let user = await this.prisma.user.findUnique({
         where: { discordId: targetUser.id },
         include: { leetCodeProfile: true, guildMemberships: true },
       });
@@ -788,6 +830,53 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
           content: `❌ ${targetUser.username} has not linked their verified LeetCode profile yet. Use \`/link\`!`,
         });
         return;
+      }
+
+      // If contest metrics or solve count is missing / stale, refresh on the fly
+      if (
+        user.leetCodeProfile.contestRating === null ||
+        !user.leetCodeProfile.lastSyncedAt ||
+        Date.now() - user.leetCodeProfile.lastSyncedAt.getTime() > 5 * 60 * 1000
+      ) {
+        try {
+          const [liveProfile, contestRanking] = await Promise.all([
+            this.leetcode.fetchUserProfile(user.leetCodeProfile.username).catch(() => null),
+            this.leetcode.fetchContestRanking(user.leetCodeProfile.username).catch(() => null),
+          ]);
+
+          if (liveProfile) {
+            const allCount = liveProfile.submitStats.acSubmissionNum.find((s) => s.difficulty === 'All')?.count || 0;
+            const easyCount = liveProfile.submitStats.acSubmissionNum.find((s) => s.difficulty === 'Easy')?.count || 0;
+            const medCount = liveProfile.submitStats.acSubmissionNum.find((s) => s.difficulty === 'Medium')?.count || 0;
+            const hardCount = liveProfile.submitStats.acSubmissionNum.find((s) => s.difficulty === 'Hard')?.count || 0;
+
+            const updatedProfile = await this.prisma.leetCodeProfile.update({
+              where: { id: user.leetCodeProfile.id },
+              data: {
+                totalSolved: allCount,
+                easySolved: easyCount,
+                mediumSolved: medCount,
+                hardSolved: hardCount,
+                ranking: liveProfile.ranking,
+                avatar: liveProfile.userAvatar || undefined,
+                contestRating: contestRanking?.rating ? Math.round(contestRanking.rating) : undefined,
+                contestGlobalRank: contestRanking?.globalRanking || undefined,
+                lastSyncedAt: new Date(),
+              },
+            });
+            user.leetCodeProfile = updatedProfile;
+
+            if (liveProfile.streak) {
+              const updatedUser = await this.prisma.user.update({
+                where: { id: user.id },
+                data: { longestStreak: Math.max(user.longestStreak, liveProfile.streak) },
+              });
+              user.longestStreak = updatedUser.longestStreak;
+            }
+          }
+        } catch {
+          // fallback to cached DB data
+        }
       }
 
       const guildMember = user.guildMemberships.find((m) => m.guildId === interaction.guildId);

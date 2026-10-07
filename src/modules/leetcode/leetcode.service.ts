@@ -62,6 +62,10 @@ export class LeetCodeService {
             userAvatar
             ranking
           }
+          userCalendar {
+            streak
+            totalActiveDays
+          }
           submitStats {
             acSubmissionNum {
               difficulty
@@ -98,6 +102,8 @@ export class LeetCodeService {
         aboutMe: user.profile?.aboutMe || null,
         userAvatar: user.profile?.userAvatar || null,
         ranking: user.profile?.ranking || null,
+        streak: user.userCalendar?.streak || 0,
+        totalActiveDays: user.userCalendar?.totalActiveDays || 0,
         allQuestionsCount: data.allQuestionsCount || [],
         submitStats: user.submitStats || { acSubmissionNum: [] },
       };

@@ -24,6 +24,8 @@ export interface LeetCodeUserProfile {
       submissions: number;
     }[];
   };
+  streak?: number;
+  totalActiveDays?: number;
 }
 
 export interface LeetCodeContestRanking {
