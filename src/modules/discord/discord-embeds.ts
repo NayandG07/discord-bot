@@ -136,19 +136,63 @@ export class DiscordEmbeds {
   }
 
   static createDailyRecapEmbed(summary: any): EmbedBuilder {
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
       .setTitle('📊 DEVGUILD DAILY RECAP')
       .setColor(0x00e5ff)
       .setDescription(
-        `Here is the 24-hour guild LeetCode summary!\n\n` +
+        `Here is the 24-hour guild LeetCode digest!\n\n` +
           `• Total Problems Solved: **${summary.totalSolves}**\n` +
           `• Active Coders: **${summary.activeSolversCount}**\n` +
-          `• Total Guild XP Earned: **+${summary.totalXpEarned.toLocaleString()} XP**\n\n` +
+          `• Total Guild XP Earned: **+${(summary.totalXpEarned || 0).toLocaleString()} XP**\n\n` +
           `**Difficulty Distribution**:\n` +
-          `🟩 Easy: **${summary.difficultyDistribution.easy}**  |  🟨 Medium: **${summary.difficultyDistribution.medium}**  |  🟥 Hard: **${summary.difficultyDistribution.hard}**\n\n` +
-          `Keep up the grind and protect your daily streak! 🔥`,
+          `🟩 Easy: **${summary.difficultyDistribution?.easy ?? 0}**  |  🟨 Medium: **${summary.difficultyDistribution?.medium ?? 0}**  |  🟥 Hard: **${summary.difficultyDistribution?.hard ?? 0}**`,
       )
       .setFooter({ text: 'DevGuild Daily Digest • Consistency over intensity' })
       .setTimestamp();
+
+    if (summary.solvers && summary.solvers.length > 0) {
+      const solversText = summary.solvers
+        .map((s: any, idx: number) => {
+          const medal = idx === 0 ? '👑' : '⭐';
+          const breakdown = `(${s.easy}E / ${s.medium}M / ${s.hard}H)`;
+          const problemSample = s.problems.slice(0, 3).join(', ');
+          const more = s.problems.length > 3 ? ` +${s.problems.length - 3} more` : '';
+          return `${medal} **${s.username}** — **${s.solvesCount} solve${s.solvesCount > 1 ? 's' : ''}** ${breakdown}\n└ *${problemSample}${more}*`;
+        })
+        .join('\n\n');
+
+      embed.addFields({
+        name: '👥 Coders Active Today',
+        value: solversText.length > 1024 ? solversText.substring(0, 1020) + '...' : solversText,
+      });
+    }
+
+    return embed;
+  }
+
+  static createLeaderboardEmbed(title: string, entries: any[]): EmbedBuilder {
+    const embed = new EmbedBuilder()
+      .setTitle(`🏆 DEVGUILD LEADERBOARD — ${title.toUpperCase()}`)
+      .setColor(0xffd700)
+      .setFooter({ text: 'DevGuild Competitive Rankings • Updated Realtime' })
+      .setTimestamp();
+
+    if (!entries || entries.length === 0) {
+      embed.setDescription('No active entries found for this leaderboard yet. Start solving to claim the #1 spot! 🔥');
+      return embed;
+    }
+
+    const rankEmojis = ['🥇', '🥈', '🥉'];
+    const description = entries
+      .map((entry, idx) => {
+        const medal = rankEmojis[idx] || `\`#${entry.rank}\``;
+        const tier = entry.tier ? ` [${entry.tier}]` : '';
+        const value = typeof entry.metricValue === 'number' ? entry.metricValue.toLocaleString() : entry.metricValue;
+        return `${medal} **${entry.username}**${tier} — **${value}** ${entry.metricLabel}`;
+      })
+      .join('\n');
+
+    embed.setDescription(description);
+    return embed;
   }
 }

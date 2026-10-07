@@ -21,6 +21,7 @@ import { ProblemDifficulty } from '@prisma/client';
 import { DiscordEmbeds } from './discord-embeds';
 import { SLASH_COMMANDS } from './discord.commands';
 import { ActivityCreatedEventPayload } from '../activity/activity.types';
+import { LeaderboardService } from '../leaderboards/leaderboard.service';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -38,6 +39,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     private readonly reliability: ReliabilityService,
     private readonly recap: RecapService,
     private readonly activity: ActivityService,
+    private readonly leaderboard?: LeaderboardService,
   ) {
     this.client = new Client({
       intents: [GatewayIntentBits.Guilds],
@@ -800,9 +802,8 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
           this.externalOperationTimeoutMs,
           'Daily recap generation',
         );
-        await interaction.editReply({
-          content: `📊 **Daily Guild Recap**:\nTotal Solves: **${summary.totalSolves}** across **${summary.activeSolversCount}** members!\nXP Earned: **+${summary.totalXpEarned} XP**`,
-        });
+        const embed = DiscordEmbeds.createDailyRecapEmbed(summary);
+        await interaction.editReply({ embeds: [embed] });
       } else if (sub === 'wrapped') {
         await interaction.deferReply();
         const user = await this.prisma.user.findUnique({ where: { discordId: interaction.user.id } });
@@ -826,6 +827,47 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
           content: '❌ Please choose a valid recap option: `daily` or `wrapped`.',
         });
       }
+    } else if (commandName === 'leaderboard') {
+      if (!interaction.guildId) {
+        await interaction.reply({ content: '❌ This command can only be used inside a server.', flags: 64 });
+        return;
+      }
+      await interaction.deferReply();
+
+      const guild = await this.prisma.guild.findUnique({
+        where: { discordGuildId: interaction.guildId },
+      });
+
+      if (!guild) {
+        await interaction.editReply({ content: '❌ Guild profile not found. Please run `/setup-channel` first!' });
+        return;
+      }
+
+      if (!this.leaderboard) {
+        await interaction.editReply({ content: '⚠️ Leaderboard service is currently unavailable.' });
+        return;
+      }
+
+      const sub = interaction.options.getSubcommand() || 'weekly';
+      let title = 'Weekly XP';
+      let entries: any[] = [];
+
+      if (sub === 'weekly') {
+        title = 'Weekly XP';
+        entries = await this.leaderboard.getWeeklyLeaderboard(guild.id, 10);
+      } else if (sub === 'streak') {
+        title = 'Daily Streaks';
+        entries = await this.leaderboard.getStreakLeaderboard(guild.id, 10);
+      } else if (sub === 'consistency') {
+        title = 'Consistency & Reliability';
+        entries = await this.leaderboard.getConsistencyLeaderboard(guild.id, 10);
+      } else if (sub === 'contests') {
+        title = 'Contest Raid Damage';
+        entries = await this.leaderboard.getContestLeaderboard(guild.id, 10);
+      }
+
+      const embed = DiscordEmbeds.createLeaderboardEmbed(title, entries);
+      await interaction.editReply({ embeds: [embed] });
     } else {
       await interaction.reply({ content: `Command \`/${commandName}\` acknowledged!`, flags: 64 });
     }

@@ -39,12 +39,41 @@ export class RecapService {
 
     let easy = 0, medium = 0, hard = 0;
     const solvers = new Set<string>();
+    const solversMap = new Map<string, {
+      userId: string;
+      username: string;
+      discordId: string;
+      solvesCount: number;
+      problems: string[];
+      easy: number;
+      medium: number;
+      hard: number;
+    }>();
 
     activities.forEach((a) => {
       solvers.add(a.userId);
       if (a.difficulty === ProblemDifficulty.EASY) easy++;
       if (a.difficulty === ProblemDifficulty.MEDIUM) medium++;
       if (a.difficulty === ProblemDifficulty.HARD) hard++;
+
+      const existing = solversMap.get(a.userId) || {
+        userId: a.userId,
+        username: a.user.username,
+        discordId: a.user.discordId,
+        solvesCount: 0,
+        problems: [],
+        easy: 0,
+        medium: 0,
+        hard: 0,
+      };
+      existing.solvesCount++;
+      if (!existing.problems.includes(a.problemTitle)) {
+        existing.problems.push(a.problemTitle);
+      }
+      if (a.difficulty === ProblemDifficulty.EASY) existing.easy++;
+      if (a.difficulty === ProblemDifficulty.MEDIUM) existing.medium++;
+      if (a.difficulty === ProblemDifficulty.HARD) existing.hard++;
+      solversMap.set(a.userId, existing);
     });
 
     const xpSum = await this.prisma.xPTransactions.aggregate({
@@ -60,6 +89,7 @@ export class RecapService {
       activeSolversCount: solvers.size,
       difficultyDistribution: { easy, medium, hard },
       totalXpEarned: xpSum._sum.finalAmount || 0,
+      solvers: Array.from(solversMap.values()).sort((a, b) => b.solvesCount - a.solvesCount),
       timestamp: new Date(),
     };
 

@@ -6,9 +6,10 @@ import { LeetCodeModule } from '../leetcode/leetcode.module';
 import { ReliabilityModule } from '../reliability/reliability.module';
 import { RecapModule } from '../recaps/recap.module';
 import { ActivityModule } from '../activity/activity.module';
+import { LeaderboardModule } from '../leaderboards/leaderboard.module';
 
 @Module({
-  imports: [ConfigModule, LeetCodeModule, ReliabilityModule, RecapModule, ActivityModule],
+  imports: [ConfigModule, LeetCodeModule, ReliabilityModule, RecapModule, ActivityModule, LeaderboardModule],
   controllers: [DiscordInteractionsController],
   providers: [DiscordService],
   exports: [DiscordService],
