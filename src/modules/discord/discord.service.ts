@@ -57,6 +57,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
 
   private async initDiscord(token: string) {
     try {
+      this.logger.log(`TOKEN_DEBUG: length=${token.length}, prefix="${token.substring(0, 12)}", suffix="${token.substring(token.length - 6)}"`);
       this.logger.log(`Connecting DevGuild to Discord Gateway (token prefix: ${token.substring(0, 8)}...)...`);
       await this.client.login(token);
       this.logger.log(`Discord login successful. Tag: ${this.client.user?.tag}`);
