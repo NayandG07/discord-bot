@@ -77,9 +77,24 @@ export class DiscordInteractionsController {
 
     // Step 3: APPLICATION_COMMAND (slash command)
     if (body.type === 2) {
-      // Respond immediately with deferred ephemeral (shows "thinking..." to user)
+      if (typeof this.discordService.executeHttpSlashCommand === 'function') {
+        try {
+          const directResponse = await Promise.race([
+            this.discordService.executeHttpSlashCommand(body),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+          ]);
+
+          if (directResponse) {
+            this.logger.log(`Responding synchronously to slash command /${body.data?.name ?? 'unknown'}.`);
+            return res.json({ type: 4, data: directResponse });
+          }
+        } catch (err: any) {
+          this.logger.error(`Error processing synchronous slash command: ${err.message}`, err.stack);
+        }
+      }
+
+      // Deferred fallback: If command takes longer than 2.5s or in test mode
       res.json({ type: 5, data: { flags: 64 } });
-      // Process command asynchronously after sending HTTP response
       this.discordService.handleHttpSlashCommand(body).catch((err) => {
         this.logger.error(`Error handling HTTP slash command: ${err.message}`, err.stack);
       });
@@ -88,7 +103,24 @@ export class DiscordInteractionsController {
 
     // Step 4: MESSAGE_COMPONENT (button click)
     if (body.type === 3) {
-      res.json({ type: 6 }); // Deferred component update
+      if (typeof this.discordService.executeHttpComponentInteraction === 'function') {
+        try {
+          const directResponse = await Promise.race([
+            this.discordService.executeHttpComponentInteraction(body),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+          ]);
+
+          if (directResponse) {
+            this.logger.log(`Responding synchronously to button interaction ${body.data?.custom_id ?? 'unknown'}.`);
+            return res.json({ type: 4, data: directResponse });
+          }
+        } catch (err: any) {
+          this.logger.error(`Error processing synchronous button interaction: ${err.message}`, err.stack);
+        }
+      }
+
+      // Deferred fallback
+      res.json({ type: 6 });
       this.discordService.handleHttpComponentInteraction(body).catch((err) => {
         this.logger.error(`Error handling HTTP component interaction: ${err.message}`, err.stack);
       });

@@ -85,6 +85,141 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Executes a slash command synchronously and returns the response payload for direct HTTP response.
+   * This eliminates any outbound webhook calls to Discord, completely bypassing Cloudflare rate limits on Render.
+   */
+  async executeHttpSlashCommand(body: any): Promise<any> {
+    const guildId = body.guild_id ?? null;
+    const userId = body.member?.user?.id ?? body.user?.id ?? '';
+    const username = body.member?.user?.username ?? body.user?.username ?? '';
+    const rawOptions: any[] = body.data?.options ?? [];
+
+    const options: any[] = [];
+    for (const opt of rawOptions) {
+      if (opt.type === 1 && Array.isArray(opt.options)) {
+        options.push(...opt.options);
+      } else {
+        options.push(opt);
+      }
+    }
+
+    let capturedResponse: any = null;
+    let isEphemeral = false;
+
+    const toJson = (payload: any, defaultFlags?: number): any => {
+      let data: any = {};
+      if (typeof payload === 'string') {
+        data = { content: payload };
+      } else if (payload && typeof payload === 'object') {
+        const { files, ...rest } = payload;
+        data = { ...rest };
+      }
+      if (Array.isArray(data.embeds)) {
+        data.embeds = data.embeds.map((e: any) => typeof e?.toJSON === 'function' ? e.toJSON() : e);
+      }
+      if (Array.isArray(data.components)) {
+        data.components = data.components.map((c: any) => typeof c?.toJSON === 'function' ? c.toJSON() : c);
+      }
+      if (defaultFlags && data.flags === undefined) {
+        data.flags = defaultFlags;
+      }
+      return data;
+    };
+
+    const mockInteraction: any = {
+      commandName: body.data?.name,
+      guildId,
+      guild: guildId ? { id: guildId, name: body.guild?.name ?? guildId, iconURL: () => null } : null,
+      user: { id: userId, username },
+      deferred: false,
+      replied: false,
+      options: {
+        getString: (name: string, required = false) => options.find((o) => o.name === name)?.value ?? null,
+        getChannel: (name: string) => {
+          const opt = options.find((o) => o.name === name);
+          if (!opt) return null;
+          return { id: opt.value, name: `channel-${opt.value}` };
+        },
+        getUser: (name: string) => {
+          const opt = options.find((o) => o.name === name);
+          if (!opt) return null;
+          return { id: opt.value, username: body.data?.resolved?.users?.[opt.value]?.username ?? opt.value };
+        },
+        getSubcommand: () => rawOptions.find((o) => o.type === 1)?.name ?? null,
+      },
+      deferReply: async (opts?: any) => {
+        if (opts?.flags === 64) isEphemeral = true;
+      },
+      reply: async (payload: any) => {
+        capturedResponse = toJson(payload, isEphemeral ? 64 : undefined);
+      },
+      editReply: async (payload: any) => {
+        capturedResponse = toJson(payload, isEphemeral ? 64 : undefined);
+      },
+      followUp: async (payload: any) => {
+        capturedResponse = toJson(payload, isEphemeral ? 64 : undefined);
+      },
+      isRepliable: () => true,
+      isChatInputCommand: () => true,
+      isButton: () => false,
+    };
+
+    await this.handleSlashCommand(mockInteraction as ChatInputCommandInteraction);
+    return capturedResponse;
+  }
+
+  /**
+   * Executes a button/component interaction synchronously and returns the response payload.
+   */
+  async executeHttpComponentInteraction(body: any): Promise<any> {
+    const userId = body.member?.user?.id ?? body.user?.id ?? '';
+    const username = body.member?.user?.username ?? body.user?.username ?? '';
+
+    let capturedResponse: any = null;
+
+    const toJson = (payload: any, defaultFlags?: number): any => {
+      let data: any = {};
+      if (typeof payload === 'string') {
+        data = { content: payload };
+      } else if (payload && typeof payload === 'object') {
+        const { files, ...rest } = payload;
+        data = { ...rest };
+      }
+      if (Array.isArray(data.embeds)) {
+        data.embeds = data.embeds.map((e: any) => typeof e?.toJSON === 'function' ? e.toJSON() : e);
+      }
+      if (Array.isArray(data.components)) {
+        data.components = data.components.map((c: any) => typeof c?.toJSON === 'function' ? c.toJSON() : c);
+      }
+      if (defaultFlags && data.flags === undefined) {
+        data.flags = defaultFlags;
+      }
+      return data;
+    };
+
+    const mockInteraction: any = {
+      customId: body.data?.custom_id,
+      user: { id: userId, username },
+      deferred: false,
+      replied: false,
+      deferReply: async () => {},
+      deferUpdate: async () => {},
+      editReply: async (payload: any) => {
+        capturedResponse = toJson(payload, 64);
+      },
+      reply: async (payload: any) => {
+        capturedResponse = toJson(payload, 64);
+      },
+      isRepliable: () => true,
+      isButton: () => true,
+      isChatInputCommand: () => false,
+    };
+
+    await this.handleButtonInteraction(mockInteraction as ButtonInteraction);
+    return capturedResponse;
+  }
+
+  /**
    * Builds a lightweight mock interaction object from raw Discord HTTP payload,
    * then dispatches it to the existing slash command handler.
    * This allows all command logic to work identically in both Gateway and HTTP modes.
