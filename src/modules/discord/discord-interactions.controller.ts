@@ -13,6 +13,8 @@ import { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { DiscordService } from './discord.service';
 
+type DiscordRequest = Request & { rawBody?: Buffer };
+
 @Controller('discord')
 export class DiscordInteractionsController {
   private readonly logger = new Logger(DiscordInteractionsController.name);
@@ -30,21 +32,41 @@ export class DiscordInteractionsController {
   @Post('interactions')
   @HttpCode(HttpStatus.OK)
   async handleInteraction(
-    @Req() req: Request & { rawBody?: Buffer },
+    @Req() req: DiscordRequest,
     @Res() res: Response,
-    @Headers('x-signature-ed25519') signature: string,
-    @Headers('x-signature-timestamp') timestamp: string,
+    @Headers('x-signature-ed25519') signature?: string,
+    @Headers('x-signature-timestamp') timestamp?: string,
   ) {
-    const rawBody: Buffer = (req as any).rawBody ?? Buffer.from(JSON.stringify(req.body));
-    const publicKey = this.config.get<string>('DISCORD_PUBLIC_KEY') ?? '';
+    // Read headers from the request as a fallback. This keeps verification working
+    // with Express adapters/proxies that do not populate Nest's @Headers argument.
+    const signatureHeader = this.getHeader(signature, req.headers['x-signature-ed25519']);
+    const timestampHeader = this.getHeader(timestamp, req.headers['x-signature-timestamp']);
+    const rawBody = req.rawBody;
 
-    // Step 1: Verify Ed25519 signature from Discord
-    if (!this.verifySignature(rawBody, signature, timestamp, publicKey)) {
-      this.logger.warn('Rejected interaction request with invalid signature.');
-      return res.status(401).json({ error: 'Invalid request signature' });
+    // Discord signs the exact bytes sent over the wire. Never reconstruct the body
+    // from req.body because JSON parsing/stringifying can change whitespace, escapes,
+    // or property ordering and invalidate an otherwise valid signature.
+    if (!rawBody || !signatureHeader || !timestampHeader) {
+      this.logger.warn('Rejected interaction request because signature headers or raw body are missing.');
+      return res.status(HttpStatus.UNAUTHORIZED).json({ error: 'Invalid request signature' });
     }
 
-    const body = JSON.parse(rawBody.toString('utf-8'));
+    const publicKey = this.config.get<string>('DISCORD_PUBLIC_KEY')?.trim() ?? '';
+
+    // Step 1: Verify Ed25519 signature from Discord
+    if (!this.verifySignature(rawBody, signatureHeader, timestampHeader, publicKey)) {
+      this.logger.warn('Rejected interaction request with invalid signature.');
+      return res.status(HttpStatus.UNAUTHORIZED).json({ error: 'Invalid request signature' });
+    }
+
+    let body: any;
+    try {
+      body = JSON.parse(rawBody.toString('utf-8'));
+    } catch {
+      this.logger.warn('Rejected interaction request with an invalid JSON body.');
+      return res.status(HttpStatus.BAD_REQUEST).json({ error: 'Invalid request body' });
+    }
+
     this.logger.log(`Incoming Discord interaction type=${body.type} command=${body.data?.name ?? 'n/a'}`);
 
     // Step 2: PING — Discord verifies the endpoint is live
@@ -76,6 +98,14 @@ export class DiscordInteractionsController {
     return res.json({ type: 1 });
   }
 
+  private getHeader(
+    decoratorValue: string | undefined,
+    requestValue: string | string[] | undefined,
+  ): string | undefined {
+    if (decoratorValue) return decoratorValue;
+    return Array.isArray(requestValue) ? requestValue[0] : requestValue;
+  }
+
   /**
    * Verify Discord's Ed25519 signature using Node.js built-in crypto.
    * No external packages required.
@@ -87,6 +117,10 @@ export class DiscordInteractionsController {
     publicKey: string,
   ): boolean {
     try {
+      if (!/^[0-9a-f]{128}$/i.test(signature) || !/^\d+$/.test(timestamp) || !/^[0-9a-f]{64}$/i.test(publicKey)) {
+        return false;
+      }
+
       const message = Buffer.concat([Buffer.from(timestamp, 'utf-8'), rawBody]);
 
       // Wrap raw 32-byte Ed25519 public key in DER/SPKI format
