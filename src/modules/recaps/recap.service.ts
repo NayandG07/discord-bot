@@ -9,8 +9,25 @@ export class RecapService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async generateDailyGuildRecap(guildId: string) {
+  async generateDailyGuildRecap(guildIdOrDiscordId: string) {
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const guild = await this.prisma.guild.findFirst({
+      where: {
+        OR: [{ id: guildIdOrDiscordId.length === 36 ? guildIdOrDiscordId : undefined }, { discordGuildId: guildIdOrDiscordId }],
+      },
+    });
+
+    if (!guild) {
+      return {
+        totalSolves: 0,
+        activeSolversCount: 0,
+        difficultyDistribution: { easy: 0, medium: 0, hard: 0 },
+        totalXpEarned: 0,
+      };
+    }
+
+    const guildId = guild.id;
 
     const activities = await this.prisma.activity.findMany({
       where: {

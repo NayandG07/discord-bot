@@ -105,4 +105,50 @@ export class DiscordEmbeds {
       .setFooter({ text: 'DevGuild Raid Boss Engine' })
       .setTimestamp();
   }
+
+  static createSolveAlertEmbed(user: any, activity: any, xpAwarded?: number): EmbedBuilder {
+    const diffEmoji = activity.difficulty === 'HARD' ? '🟥' : activity.difficulty === 'MEDIUM' ? '🟨' : '🟩';
+    const color = activity.difficulty === 'HARD' ? 0xff1744 : activity.difficulty === 'MEDIUM' ? 0xffd700 : 0x00e676;
+
+    const embed = new EmbedBuilder()
+      .setTitle(`${diffEmoji} NEW PROBLEM SOLVED!`)
+      .setColor(color)
+      .setDescription(
+        `**${user.username}** just solved **[${activity.problemTitle}](https://leetcode.com/problems/${activity.problemSlug}/)**!`,
+      )
+      .addFields(
+        { name: 'Difficulty', value: `\`${activity.difficulty}\``, inline: true },
+        { name: 'Topic', value: `\`${(activity.primaryTopic || 'ALGORITHMS').replace(/_/g, ' ')}\``, inline: true },
+        { name: 'Streak', value: `🔥 **${user.currentStreak} Days**`, inline: true },
+      )
+      .setFooter({ text: 'DevGuild Automated Activity Tracker' })
+      .setTimestamp(activity.submissionTimestamp ? new Date(activity.submissionTimestamp) : new Date());
+
+    if (xpAwarded) {
+      embed.addFields({ name: 'XP Awarded', value: `⭐ **+${xpAwarded} XP**`, inline: true });
+    }
+
+    if (user.avatarUrl) {
+      embed.setThumbnail(user.avatarUrl);
+    }
+
+    return embed;
+  }
+
+  static createDailyRecapEmbed(summary: any): EmbedBuilder {
+    return new EmbedBuilder()
+      .setTitle('📊 DEVGUILD DAILY RECAP')
+      .setColor(0x00e5ff)
+      .setDescription(
+        `Here is the 24-hour guild LeetCode summary!\n\n` +
+          `• Total Problems Solved: **${summary.totalSolves}**\n` +
+          `• Active Coders: **${summary.activeSolversCount}**\n` +
+          `• Total Guild XP Earned: **+${summary.totalXpEarned.toLocaleString()} XP**\n\n` +
+          `**Difficulty Distribution**:\n` +
+          `🟩 Easy: **${summary.difficultyDistribution.easy}**  |  🟨 Medium: **${summary.difficultyDistribution.medium}**  |  🟥 Hard: **${summary.difficultyDistribution.hard}**\n\n` +
+          `Keep up the grind and protect your daily streak! 🔥`,
+      )
+      .setFooter({ text: 'DevGuild Daily Digest • Consistency over intensity' })
+      .setTimestamp();
+  }
 }

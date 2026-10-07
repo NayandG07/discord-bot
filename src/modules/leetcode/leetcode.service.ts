@@ -28,13 +28,19 @@ export class LeetCodeService {
   }
 
   async checkRateLimit(key: string, limit = 10, windowSec = 60): Promise<boolean> {
-    const redis = this.redisService.getClient();
-    const redisKey = `devguild:rate:leetcode:${key}`;
-    const count = await redis.incr(redisKey);
-    if (count === 1) {
-      await redis.expire(redisKey, windowSec);
+    try {
+      const redis = this.redisService.getClient();
+      if (!redis) return true;
+      const redisKey = `devguild:rate:leetcode:${key}`;
+      const count = await redis.incr(redisKey);
+      if (count === 1) {
+        await redis.expire(redisKey, windowSec);
+      }
+      return count <= limit;
+    } catch (err: any) {
+      this.logger.warn(`Redis rate limit check error (failing open): ${err.message}`);
+      return true;
     }
-    return count <= limit;
   }
 
   async fetchUserProfile(username: string): Promise<LeetCodeUserProfile> {

@@ -1,0 +1,57 @@
+services:
+  - type: web
+    name: devguild
+    runtime: node
+    plan: free
+    region: oregon # Render free tier default regions: oregon, ohio, frankfurt, singapore
+    buildCommand: npm run render-build
+    startCommand: npm run start:prod
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: COMBINED_MODE
+        value: "true"
+      - key: API_PREFIX
+        value: api/v1
+      - key: APP_NAME
+        value: DevGuild
+      - key: NODE_VERSION
+        value: 20.12.0
+      - key: DATABASE_URL
+        sync: false # Set in Render Dashboard
+      - key: DIRECT_URL
+        sync: false # Set in Render Dashboard
+      - key: REDIS_HOST
+        sync: false # Set in Render Dashboard
+      - key: REDIS_PORT
+        sync: false # Set in Render Dashboard
+      - key: REDIS_PASSWORD
+        sync: false # Set in Render Dashboard
+      - key: REDIS_TLS
+        value: "false"
+      - key: REDIS_PREFIX
+        value: "devguild:"
+      - key: DISCORD_CLIENT_ID
+        sync: false # Set in Render Dashboard
+      - key: DISCORD_BOT_TOKEN
+        sync: false # Set in Render Dashboard
+      - key: DISCORD_PUBLIC_KEY
+        sync: false # Set in Render Dashboard
+      - key: DISCORD_CLIENT_SECRET
+        sync: false # Set in Render Dashboard
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 900s
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 7d
+      - key: LEETCODE_GRAPHQL_ENDPOINT
+        value: https://leetcode.com/graphql
+      - key: LEETCODE_POLL_INTERVAL_MINUTES
+        value: "5"
+      - key: LEETCODE_REQUEST_RATE_LIMIT
+        value: "10"

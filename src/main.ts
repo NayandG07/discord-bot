@@ -47,8 +47,8 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, document);
 
   const port = process.env.PORT || 3000;
-  await app.listen(port);
-  logger.log(`DevGuild REST API is running on http://localhost:${port}/api/v1`);
+  await app.listen(port, '0.0.0.0');
+  logger.log(`DevGuild REST API is running on http://0.0.0.0:${port}/api/v1`);
   logger.log(`Swagger OpenAPI Documentation available at http://localhost:${port}/docs`);
 
   // If COMBINED_MODE is enabled (default for single-instance free hosting like Render or Koyeb),
@@ -59,6 +59,7 @@ async function bootstrap() {
       const { PrismaService } = await import('./common/prisma/prisma.service');
       const { LeetCodeService } = await import('./modules/leetcode/leetcode.service');
       const { ActivityService } = await import('./modules/activity/activity.service');
+      const { DiscordService } = await import('./modules/discord/discord.service');
       const { RedisService } = await import('./common/redis/redis.service');
       const { createLeetCodeSyncWorker } = await import('./workers/leetcode-sync.worker');
       const { Queue } = await import('bullmq');
@@ -66,6 +67,7 @@ async function bootstrap() {
       const prisma = app.get(PrismaService);
       const leetcode = app.get(LeetCodeService);
       const activity = app.get(ActivityService);
+      const discord = app.get(DiscordService);
       const redisService = app.get(RedisService);
       const redisClient = redisService.getClient();
 
@@ -75,7 +77,7 @@ async function bootstrap() {
         password: redisClient.options.password,
       };
 
-      createLeetCodeSyncWorker(prisma, leetcode, activity, connection);
+      createLeetCodeSyncWorker(prisma, leetcode, activity, connection, discord);
 
       const syncQueue = new Queue('leetcode-sync-queue', { connection });
       await syncQueue.add(
@@ -83,7 +85,16 @@ async function bootstrap() {
         {},
         {
           repeat: {
-            pattern: '*/15 * * * *',
+            pattern: '*/5 * * * *', // Poll every 5 minutes
+          },
+        },
+      );
+      await syncQueue.add(
+        'broadcast-daily-recaps',
+        {},
+        {
+          repeat: {
+            pattern: '0 0 * * *', // Midnight UTC daily recap
           },
         },
       );
@@ -93,6 +104,14 @@ async function bootstrap() {
     }
   }
 }
+
+process.on('unhandledRejection', (reason: any) => {
+  console.error('[Process] Unhandled Rejection:', reason?.message || reason);
+});
+
+process.on('uncaughtException', (err: any) => {
+  console.error('[Process] Uncaught Exception:', err?.message || err);
+});
 
 bootstrap().catch((err) => {
   console.error('Fatal error during application startup:', err);

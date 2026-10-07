@@ -9,6 +9,7 @@ export function createLeetCodeSyncWorker(
   leetcode: LeetCodeService,
   activity: ActivityService,
   connection: any,
+  discord?: any,
 ) {
   const logger = new Logger('LeetCodeSyncWorker');
 
@@ -16,6 +17,12 @@ export function createLeetCodeSyncWorker(
     'leetcode-sync-queue',
     async (job: Job) => {
       logger.log(`Processing LeetCode sync job: ${job.name} (ID: ${job.id})`);
+
+      if (job.name === 'broadcast-daily-recaps' && discord) {
+        logger.log('Executing automated daily recap broadcast for all guilds...');
+        await discord.broadcastDailyRecapToAllGuilds();
+        return;
+      }
 
       if (job.name === 'poll-all-active-users') {
         // Query active verified users

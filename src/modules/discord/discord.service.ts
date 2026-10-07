@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { OnEvent } from '@nestjs/event-emitter';
 import {
   Client,
   GatewayIntentBits,
@@ -15,8 +16,11 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { LeetCodeService } from '../leetcode/leetcode.service';
 import { ReliabilityService } from '../reliability/reliability.service';
 import { RecapService } from '../recaps/recap.service';
+import { ActivityService } from '../activity/activity.service';
+import { ProblemDifficulty } from '@prisma/client';
 import { DiscordEmbeds } from './discord-embeds';
 import { SLASH_COMMANDS } from './discord.commands';
+import { ActivityCreatedEventPayload } from '../activity/activity.types';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -30,6 +34,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     private readonly leetcode: LeetCodeService,
     private readonly reliability: ReliabilityService,
     private readonly recap: RecapService,
+    private readonly activity: ActivityService,
   ) {
     this.client = new Client({
       intents: [
@@ -81,8 +86,12 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   }
 
   private registerEventHandlers() {
-    this.client.on('ready', () => {
+    this.client.on('clientReady', () => {
       this.logger.log(`DevGuild Discord Bot logged in as ${this.client.user?.tag}!`);
+    });
+
+    this.client.on('error', (err) => {
+      this.logger.error(`Discord client error encountered: ${err.message}`, err.stack);
     });
 
     this.client.on('interactionCreate', async (interaction) => {
@@ -94,13 +103,17 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         }
       } catch (err: any) {
         this.logger.error(`Error handling interaction: ${err.message}`, err.stack);
-        if (interaction.isRepliable()) {
-          const content = '⚠️ An internal error occurred while executing this command.';
-          if (interaction.deferred || interaction.replied) {
-            await interaction.followUp({ content, ephemeral: true });
-          } else {
-            await interaction.reply({ content, ephemeral: true });
+        try {
+          if (interaction.isRepliable()) {
+            const content = '⚠️ An internal error occurred while executing this command.';
+            if (interaction.deferred || interaction.replied) {
+              await interaction.followUp({ content, flags: 64 });
+            } else {
+              await interaction.reply({ content, flags: 64 });
+            }
           }
+        } catch (replyErr: any) {
+          this.logger.error(`Failed to deliver interaction error response: ${replyErr.message}`);
         }
       }
     });
@@ -109,9 +122,75 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   private async handleSlashCommand(interaction: ChatInputCommandInteraction) {
     const { commandName } = interaction;
 
+    if (commandName === 'setup-channel') {
+      if (!interaction.guildId || !interaction.guild) {
+        await interaction.reply({ content: '❌ This command can only be executed inside a Discord server.', flags: 64 });
+        return;
+      }
+
+      await interaction.deferReply({ flags: 64 });
+      const alertType = interaction.options.getString('type') || 'all';
+      const targetChannel = interaction.options.getChannel('channel', true);
+
+      // Ensure guild exists in database
+      const guild = await this.prisma.guild.upsert({
+        where: { discordGuildId: interaction.guildId },
+        update: { name: interaction.guild.name, iconUrl: interaction.guild.iconURL() },
+        create: {
+          discordGuildId: interaction.guildId,
+          name: interaction.guild.name,
+          iconUrl: interaction.guild.iconURL(),
+        },
+      });
+
+      // Update NotificationConfig
+      const updateData: any = {};
+      if (alertType === 'all') {
+        updateData.activityChannelId = targetChannel.id;
+        updateData.recapChannelId = targetChannel.id;
+        updateData.bossBattleChannelId = targetChannel.id;
+        updateData.challengeChannelId = targetChannel.id;
+      } else if (alertType === 'activity') {
+        updateData.activityChannelId = targetChannel.id;
+      } else if (alertType === 'recap') {
+        updateData.recapChannelId = targetChannel.id;
+      } else if (alertType === 'boss') {
+        updateData.bossBattleChannelId = targetChannel.id;
+      } else if (alertType === 'challenge') {
+        updateData.challengeChannelId = targetChannel.id;
+      }
+
+      await this.prisma.notificationConfig.upsert({
+        where: { guildId: guild.id },
+        update: updateData,
+        create: {
+          guildId: guild.id,
+          ...updateData,
+        },
+      });
+
+      const labelMap: Record<string, string> = {
+        all: 'All Automated Bot Alerts (Solves, Recaps, Boss Raids, Challenges)',
+        activity: 'Problem Solve Alerts only',
+        recap: 'Daily & Weekly Recaps only',
+        boss: 'Boss Battle Contests only',
+        challenge: 'Challenges & Duels only',
+      };
+
+      await interaction.editReply({
+        content: `✅ **Alert Channel Configured!**\n**${labelMap[alertType] || alertType}** will now be routed directly to <#${targetChannel.id}>.`,
+      });
+      return;
+    }
+
     if (commandName === 'link') {
       const username = interaction.options.getString('username', true);
-      await interaction.deferReply({ ephemeral: true });
+      try {
+        await interaction.deferReply({ flags: 64 });
+      } catch (e: any) {
+        this.logger.warn(`Could not defer reply for /link: ${e.message}`);
+        return;
+      }
 
       const token = `dg-verify-${crypto.randomBytes(4).toString('hex')}`;
       const user = await this.prisma.user.upsert({
@@ -122,6 +201,28 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
           username: interaction.user.username,
         },
       });
+
+      // Link user to current guild
+      if (interaction.guildId && interaction.guild) {
+        const guild = await this.prisma.guild.upsert({
+          where: { discordGuildId: interaction.guildId },
+          update: { name: interaction.guild.name, iconUrl: interaction.guild.iconURL() },
+          create: {
+            discordGuildId: interaction.guildId,
+            name: interaction.guild.name,
+            iconUrl: interaction.guild.iconURL(),
+          },
+        });
+
+        await this.prisma.guildMember.upsert({
+          where: { guildId_userId: { guildId: guild.id, userId: user.id } },
+          update: {},
+          create: {
+            guildId: guild.id,
+            userId: user.id,
+          },
+        });
+      }
 
       await this.prisma.leetCodeProfile.upsert({
         where: { userId: user.id },
@@ -147,6 +248,75 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       );
 
       await interaction.editReply({ embeds: [embed], components: [row] });
+    } else if (commandName === 'sync') {
+      await interaction.deferReply({ flags: 64 });
+      const user = await this.prisma.user.findUnique({
+        where: { discordId: interaction.user.id },
+        include: { leetCodeProfile: true },
+      });
+
+      if (!user || !user.leetCodeProfile || !user.leetCodeProfile.isVerified) {
+        await interaction.editReply({
+          content: '❌ You do not have a verified LeetCode profile linked. Use `/link` first!',
+        });
+        return;
+      }
+
+      try {
+        const submissions = await this.leetcode.fetchRecentSubmissions(user.leetCodeProfile.username, 15);
+        const accepted = submissions.filter((s) => s.statusDisplay === 'Accepted');
+        let newCount = 0;
+
+        for (const sub of accepted) {
+          const details = await this.leetcode.fetchQuestionDetails(sub.titleSlug);
+          if (!details) continue;
+
+          const diff = details.difficulty.toUpperCase() as ProblemDifficulty;
+          const tags = details.topicTags.map((t) => t.name);
+
+          const existing = await this.prisma.activity.findUnique({
+            where: {
+              userId_leetCodeSubmissionId: {
+                userId: user.id,
+                leetCodeSubmissionId: sub.id,
+              },
+            },
+          });
+
+          if (!existing) {
+            await this.activity.ingestSubmission({
+              userId: user.id,
+              leetCodeSubmissionId: sub.id,
+              problemTitle: sub.title,
+              problemSlug: sub.titleSlug,
+              difficulty: diff,
+              topicTags: tags,
+              submissionTimestamp: new Date(Number(sub.timestamp) * 1000),
+            });
+            newCount++;
+          }
+        }
+
+        await this.prisma.leetCodeProfile.update({
+          where: { id: user.leetCodeProfile.id },
+          data: { lastSyncedAt: new Date() },
+        });
+
+        if (newCount > 0) {
+          await interaction.editReply({
+            content: `⚡ **Manual Sync Complete!** Found and processed **${newCount}** new accepted solve(s)! An alert card has been posted to your alerts channel.`,
+          });
+        } else {
+          await interaction.editReply({
+            content: `✅ **Sync Complete!** Your profile is fully up to date. (No new solves detected).`,
+          });
+        }
+      } catch (syncErr: any) {
+        this.logger.error(`Error during manual sync for ${user.username}: ${syncErr.message}`);
+        await interaction.editReply({
+          content: `⚠️ Failed to sync LeetCode profile: ${syncErr.message}`,
+        });
+      }
     } else if (commandName === 'profile') {
       await interaction.deferReply();
       const targetUser = interaction.options.getUser('user') || interaction.user;
@@ -192,13 +362,48 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         });
       }
     } else {
-      await interaction.reply({ content: `Command \`/${commandName}\` acknowledged!`, ephemeral: true });
+      await interaction.reply({ content: `Command \`/${commandName}\` acknowledged!`, flags: 64 });
+    }
+  }
+
+  @OnEvent('activity.created')
+  async handleActivityBroadcast(event: ActivityCreatedEventPayload) {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: event.userId },
+        include: { guildMemberships: { include: { guild: { include: { notificationConfig: true } } } } },
+      });
+
+      if (!user) return;
+
+      for (const membership of user.guildMemberships) {
+        const notifConfig = membership.guild.notificationConfig;
+        if (notifConfig && notifConfig.enableActivityAlerts && notifConfig.activityChannelId) {
+          try {
+            const channel = await this.client.channels.fetch(notifConfig.activityChannelId);
+            if (channel && channel.isTextBased()) {
+              const embed = DiscordEmbeds.createSolveAlertEmbed(user, event);
+              await (channel as any).send({ embeds: [embed] });
+              this.logger.log(`Broadcasted solve alert for ${user.username} to channel ${notifConfig.activityChannelId}`);
+            }
+          } catch (channelErr: any) {
+            this.logger.warn(`Could not send activity alert to channel ${notifConfig.activityChannelId}: ${channelErr.message}`);
+          }
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(`Error broadcasting activity alert: ${err.message}`, err.stack);
     }
   }
 
   private async handleButtonInteraction(interaction: ButtonInteraction) {
     if (interaction.customId.startsWith('verify_lc_')) {
-      await interaction.deferReply({ ephemeral: true });
+      try {
+        await interaction.deferReply({ flags: 64 });
+      } catch (err: any) {
+        this.logger.warn(`Could not defer reply for button: ${err.message}`);
+        return;
+      }
       const parts = interaction.customId.split('_');
       const discordId = parts[2];
       const username = parts[3];
@@ -244,6 +449,35 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       await interaction.editReply({
         content: `🎉 **Success!** Your LeetCode profile **${username}** is now verified and connected to DevGuild!`,
       });
+    }
+  }
+
+  async broadcastDailyRecapToAllGuilds() {
+    try {
+      const configs = await this.prisma.notificationConfig.findMany({
+        where: {
+          enableDailyRecaps: true,
+          recapChannelId: { not: null },
+        },
+        include: { guild: true },
+      });
+
+      for (const conf of configs) {
+        if (!conf.recapChannelId) continue;
+        try {
+          const summary = await this.recap.generateDailyGuildRecap(conf.guildId);
+          const channel = await this.client.channels.fetch(conf.recapChannelId);
+          if (channel && channel.isTextBased()) {
+            const embed = DiscordEmbeds.createDailyRecapEmbed(summary);
+            await (channel as any).send({ embeds: [embed] });
+            this.logger.log(`Broadcasted daily recap to guild ${conf.guild.name}`);
+          }
+        } catch (err: any) {
+          this.logger.warn(`Could not send daily recap to channel ${conf.recapChannelId}: ${err.message}`);
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(`Error in broadcastDailyRecapToAllGuilds: ${err.message}`);
     }
   }
 }

@@ -4,9 +4,10 @@ import { DiscordService } from './discord.service';
 import { LeetCodeModule } from '../leetcode/leetcode.module';
 import { ReliabilityModule } from '../reliability/reliability.module';
 import { RecapModule } from '../recaps/recap.module';
+import { ActivityModule } from '../activity/activity.module';
 
 @Module({
-  imports: [ConfigModule, LeetCodeModule, ReliabilityModule, RecapModule],
+  imports: [ConfigModule, LeetCodeModule, ReliabilityModule, RecapModule, ActivityModule],
   providers: [DiscordService],
   exports: [DiscordService],
 })

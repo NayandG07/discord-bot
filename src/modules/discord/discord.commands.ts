@@ -1,6 +1,31 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder, ChannelType, PermissionFlagsBits } from 'discord.js';
 
 export const SLASH_COMMANDS = [
+  new SlashCommandBuilder()
+    .setName('setup-channel')
+    .setDescription('Configure which channel receives automated alerts (Admins only)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addChannelOption((opt) =>
+      opt
+        .setName('channel')
+        .setDescription('The channel where alerts should be sent (e.g. #bot-alerts)')
+        .setRequired(true)
+        .addChannelTypes(ChannelType.GuildText),
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('type')
+        .setDescription('Which alerts to route (defaults to ALL alerts)')
+        .setRequired(false)
+        .addChoices(
+          { name: '🌟 All Automated Alerts (Solves, Recaps, Boss Raids, Challenges)', value: 'all' },
+          { name: 'Problem Solve Alerts only', value: 'activity' },
+          { name: 'Daily & Weekly Recaps only', value: 'recap' },
+          { name: 'Boss Battle Contests only', value: 'boss' },
+          { name: 'Challenges & Duels only', value: 'challenge' },
+        ),
+    ),
+
   new SlashCommandBuilder()
     .setName('link')
     .setDescription('Link your LeetCode account to DevGuild')
@@ -11,6 +36,10 @@ export const SLASH_COMMANDS = [
   new SlashCommandBuilder()
     .setName('unlink')
     .setDescription('Unlink your current LeetCode profile from DevGuild'),
+
+  new SlashCommandBuilder()
+    .setName('sync')
+    .setDescription('Instantly check your LeetCode profile for new solves and broadcast alerts'),
 
   new SlashCommandBuilder()
     .setName('profile')
