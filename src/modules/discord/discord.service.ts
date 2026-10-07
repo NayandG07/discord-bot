@@ -147,6 +147,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
           if (!opt) return null;
           return { id: opt.value, username: body.data?.resolved?.users?.[opt.value]?.username ?? opt.value };
         },
+        getInteger: (name: string) => options.find((o) => o.name === name)?.value ?? null,
         getSubcommand: () => rawOptions.find((o) => o.type === 1)?.name ?? null,
       },
       deferReply: async (opts?: any) => {
@@ -319,6 +320,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
           if (!opt) return null;
           return { id: opt.value, username: body.data?.resolved?.users?.[opt.value]?.username ?? opt.value };
         },
+        getInteger: (name: string) => options.find((o) => o.name === name)?.value ?? null,
         getSubcommand: () => rawOptions.find((o) => o.type === 1)?.name ?? null,
       },
       deferReply: async () => { /* already deferred via HTTP type=5 */ },
@@ -868,6 +870,194 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
 
       const embed = DiscordEmbeds.createLeaderboardEmbed(title, entries);
       await interaction.editReply({ embeds: [embed] });
+    } else if (commandName === 'boss') {
+      if (!interaction.guildId) {
+        await interaction.reply({ content: '❌ This command can only be used inside a server.', flags: 64 });
+        return;
+      }
+      await interaction.deferReply();
+
+      const guild = await this.prisma.guild.findUnique({
+        where: { discordGuildId: interaction.guildId },
+      });
+
+      if (!guild) {
+        await interaction.editReply({ content: '❌ Guild profile not found. Please run `/setup-channel` first!' });
+        return;
+      }
+
+      const activeBoss = await this.prisma.bossBattle.findFirst({
+        where: { guildId: guild.id, isDefeated: false },
+        include: { contest: true },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (!activeBoss) {
+        await interaction.editReply({
+          content: '🛡️ **No active Boss Battle raid currently.**\nContests launch automatically during official weekly LeetCode contests! Check back on contest days or view raid damage with `/leaderboard contests`.',
+        });
+        return;
+      }
+
+      const embed = DiscordEmbeds.createBossBattleEmbed(activeBoss);
+      await interaction.editReply({ embeds: [embed] });
+    } else if (commandName === 'unlink') {
+      await interaction.deferReply({ flags: 64 });
+      const user = await this.prisma.user.findUnique({
+        where: { discordId: interaction.user.id },
+        include: { leetCodeProfile: true },
+      });
+
+      if (!user || !user.leetCodeProfile) {
+        await interaction.editReply({ content: '❌ You do not have a linked LeetCode profile.' });
+        return;
+      }
+
+      await this.prisma.leetCodeProfile.delete({
+        where: { id: user.leetCodeProfile.id },
+      });
+
+      await interaction.editReply({ content: '✅ Your LeetCode profile has been successfully unlinked.' });
+    } else if (commandName === 'challenge') {
+      if (!interaction.guildId) {
+        await interaction.reply({ content: '❌ This command can only be used inside a server.', flags: 64 });
+        return;
+      }
+      await interaction.deferReply();
+
+      const guild = await this.prisma.guild.findUnique({
+        where: { discordGuildId: interaction.guildId },
+      });
+      if (!guild) {
+        await interaction.editReply({ content: '❌ Guild profile not found. Run `/setup-channel` first!' });
+        return;
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: { discordId: interaction.user.id },
+      });
+      if (!user) {
+        await interaction.editReply({ content: '❌ You need to link your account first using `/link`.' });
+        return;
+      }
+
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'create') {
+        const format = (interaction.options.getString('format') || 'ONE_V_ONE') as any;
+        const durationHours = interaction.options.getInteger('duration') || 24;
+        const intensity = (interaction.options.getString('intensity') || 'CASUAL') as any;
+
+        const challenge = await this.prisma.challenge.create({
+          data: {
+            guildId: guild.id,
+            creatorId: user.id,
+            format,
+            durationHours,
+            intensity,
+            status: 'CREATED',
+          },
+        });
+
+        await this.prisma.challengeParticipant.create({
+          data: {
+            challengeId: challenge.id,
+            userId: user.id,
+            teamNumber: 1,
+            status: 'ACCEPTED',
+          },
+        });
+
+        const embed = DiscordEmbeds.createChallengeLobbyEmbed(challenge, user);
+        await interaction.editReply({ embeds: [embed] });
+      } else if (sub === 'status') {
+        const activeChallenge = await this.prisma.challenge.findFirst({
+          where: { guildId: guild.id, status: { in: ['CREATED', 'ACTIVE'] } },
+          include: { creator: true, participants: { include: { user: true } } },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (!activeChallenge) {
+          await interaction.editReply({ content: 'ℹ️ No active challenges right now. Create one using `/challenge create`!' });
+          return;
+        }
+
+        const embed = DiscordEmbeds.createChallengeLobbyEmbed(activeChallenge, activeChallenge.creator);
+        await interaction.editReply({ embeds: [embed] });
+      }
+    } else if (commandName === 'team') {
+      if (!interaction.guildId) {
+        await interaction.reply({ content: '❌ This command can only be used inside a server.', flags: 64 });
+        return;
+      }
+      await interaction.deferReply();
+
+      const guild = await this.prisma.guild.findUnique({
+        where: { discordGuildId: interaction.guildId },
+      });
+      if (!guild) {
+        await interaction.editReply({ content: '❌ Guild profile not found. Run `/setup-channel` first!' });
+        return;
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: { discordId: interaction.user.id },
+      });
+      if (!user) {
+        await interaction.editReply({ content: '❌ You need to link your account first using `/link`.' });
+        return;
+      }
+
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'create') {
+        const name = interaction.options.getString('name', true);
+        const tag = interaction.options.getString('tag', true).toUpperCase();
+
+        const existing = await this.prisma.team.findFirst({
+          where: { guildId: guild.id, OR: [{ name }, { tag }] },
+        });
+
+        if (existing) {
+          await interaction.editReply({ content: `❌ A squad with name "${name}" or tag "[${tag}]" already exists.` });
+          return;
+        }
+
+        const team = await this.prisma.team.create({
+          data: {
+            guildId: guild.id,
+            leaderId: user.id,
+            name,
+            tag,
+          },
+        });
+
+        await this.prisma.teamMember.create({
+          data: {
+            teamId: team.id,
+            userId: user.id,
+            role: 'LEADER',
+          },
+        });
+
+        await interaction.editReply({
+          content: `🛡️ **Squad Created!** **[${team.tag}] ${team.name}** is now active with **${user.username}** as Leader.`,
+        });
+      } else if (sub === 'stats') {
+        const tag = interaction.options.getString('tag', true).toUpperCase();
+        const team = await this.prisma.team.findFirst({
+          where: { guildId: guild.id, tag },
+          include: { members: { include: { user: true } }, leader: true },
+        });
+
+        if (!team) {
+          await interaction.editReply({ content: `❌ Squad with tag "[${tag}]" not found.` });
+          return;
+        }
+
+        const memberList = team.members.map((m) => `• **${m.user.username}** (${m.role})`).join('\n');
+        await interaction.editReply({
+          content: `🛡️ **Squad Info: [${team.tag}] ${team.name}**\nLeader: **${team.leader.username}**\nTotal Members: **${team.members.length}**\n\n**Roster:**\n${memberList}`,
+        });
+      }
     } else {
       await interaction.reply({ content: `Command \`/${commandName}\` acknowledged!`, flags: 64 });
     }
@@ -887,12 +1077,26 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         const notifConfig = membership.guild.notificationConfig;
         if (notifConfig && notifConfig.enableActivityAlerts && notifConfig.activityChannelId) {
           try {
-            const channel = await this.client.channels.fetch(notifConfig.activityChannelId);
-            if (channel && channel.isTextBased()) {
-              const embed = DiscordEmbeds.createSolveAlertEmbed(user, event);
-              await (channel as any).send({ embeds: [embed] });
-              this.logger.log(`Broadcasted solve alert for ${user.username} to channel ${notifConfig.activityChannelId}`);
+            const embed = DiscordEmbeds.createSolveAlertEmbed(user, event);
+            let roleMention = '@DEV';
+
+            try {
+              const guildObj = await this.client.guilds.fetch(membership.guild.discordGuildId).catch(() => null);
+              if (guildObj) {
+                const roles = await guildObj.roles.fetch().catch(() => null);
+                const devRole = roles?.find((r) => r.name.toLowerCase() === 'dev');
+                if (devRole) roleMention = `<@&${devRole.id}>`;
+              }
+            } catch {
+              // fallback to '@DEV'
             }
+
+            await this.sendMessageToChannel(notifConfig.activityChannelId, {
+              content: `🔔 **Problem Solved Alert!** ${roleMention}`,
+              embeds: [embed],
+            });
+
+            this.logger.log(`Broadcasted solve alert for ${user.username} to channel ${notifConfig.activityChannelId}`);
           } catch (channelErr: any) {
             this.logger.warn(`Could not send activity alert to channel ${notifConfig.activityChannelId}: ${channelErr.message}`);
           }
@@ -973,12 +1177,25 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         if (!conf.recapChannelId) continue;
         try {
           const summary = await this.recap.generateDailyGuildRecap(conf.guildId);
-          const channel = await this.client.channels.fetch(conf.recapChannelId);
-          if (channel && channel.isTextBased()) {
-            const embed = DiscordEmbeds.createDailyRecapEmbed(summary);
-            await (channel as any).send({ embeds: [embed] });
-            this.logger.log(`Broadcasted daily recap to guild ${conf.guild.name}`);
+          const embed = DiscordEmbeds.createDailyRecapEmbed(summary);
+
+          let roleMention = '@DEV';
+          try {
+            const guildObj = await this.client.guilds.fetch(conf.guild.discordGuildId).catch(() => null);
+            if (guildObj) {
+              const roles = await guildObj.roles.fetch().catch(() => null);
+              const devRole = roles?.find((r) => r.name.toLowerCase() === 'dev');
+              if (devRole) roleMention = `<@&${devRole.id}>`;
+            }
+          } catch {
+            // fallback to '@DEV'
           }
+
+          await this.sendMessageToChannel(conf.recapChannelId, {
+            content: `📢 **Daily Guild Digest!** ${roleMention}`,
+            embeds: [embed],
+          });
+          this.logger.log(`Broadcasted daily recap to guild ${conf.guild.name}`);
         } catch (err: any) {
           this.logger.warn(`Could not send daily recap to channel ${conf.recapChannelId}: ${err.message}`);
         }
@@ -986,5 +1203,70 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     } catch (err: any) {
       this.logger.error(`Error in broadcastDailyRecapToAllGuilds: ${err.message}`);
     }
+  }
+
+  /**
+   * Resilient channel message delivery: tries discord.js client first,
+   * falls back to direct native HTTPS if the client/Gateway is unavailable.
+   */
+  async sendMessageToChannel(channelId: string, payload: { content?: string; embeds?: any[] }): Promise<void> {
+    try {
+      const channel = await this.client.channels.fetch(channelId).catch(() => null);
+      if (channel && channel.isTextBased()) {
+        await (channel as any).send(payload);
+        return;
+      }
+    } catch (err: any) {
+      this.logger.warn(`client.channels.send failed for ${channelId}: ${err.message}. Trying direct HTTPS...`);
+    }
+
+    const token = this.config.get<string>('DISCORD_BOT_TOKEN')?.trim().replace(/^["']|["']$/g, '') ?? '';
+    const https = await import('https');
+    const jsonBody = {
+      content: payload.content,
+      embeds: payload.embeds?.map((e: any) => typeof e?.toJSON === 'function' ? e.toJSON() : e),
+    };
+    const jsonStr = JSON.stringify(jsonBody);
+
+    return new Promise((resolve) => {
+      const req = https.request({
+        hostname: 'discord.com',
+        port: 443,
+        path: `/api/v10/channels/${channelId}/messages`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(jsonStr),
+          'Authorization': `Bot ${token}`,
+          'User-Agent': 'DiscordBot (https://discord.js.org, 14.16.3)',
+          'Accept': 'application/json',
+        },
+        family: 4,
+        timeout: 8000,
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            resolve();
+          } else {
+            this.logger.warn(`Direct HTTPS message to ${channelId} returned status ${res.statusCode}: ${data}`);
+            resolve();
+          }
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        resolve();
+      });
+      req.on('error', (err) => {
+        this.logger.warn(`Direct HTTPS message error: ${err.message}`);
+        resolve();
+      });
+
+      req.write(jsonStr);
+      req.end();
+    });
   }
 }
