@@ -117,18 +117,18 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       return {};
     };
 
-    /**
-     * Use native fetch (Node 18+) instead of discord.js undici-based REST.
-     * discord.js undici hangs silently on Render's network for outbound HTTPS;
-     * native fetch works reliably for the same calls.
-     */
+    // Cloudflare (which protects discord.com) requires the Discord bot User-Agent.
+    // Without it, outbound requests from data-center IPs (like Render) get an HTML challenge page.
+    const DISCORD_HEADERS = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bot ${token}`,
+      'User-Agent': 'DiscordBot (https://discord.js.org, 14.16.3)',
+    };
+
     const discordPatch = async (url: string, jsonBody: object): Promise<void> => {
       const resp = await fetch(url, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bot ${token}`,
-        },
+        headers: DISCORD_HEADERS,
         body: JSON.stringify(jsonBody),
       });
       if (!resp.ok) {
@@ -140,10 +140,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     const discordPost = async (url: string, jsonBody: object): Promise<void> => {
       const resp = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bot ${token}`,
-        },
+        headers: DISCORD_HEADERS,
         body: JSON.stringify(jsonBody),
       });
       if (!resp.ok) {
@@ -250,7 +247,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       return {};
     };
 
-    // Use native fetch — same reason as handleHttpSlashCommand (undici hangs on Render)
+    // Use native fetch with proper Discord bot User-Agent so Cloudflare doesn't block it
     const editReply = async (payload: any) => {
       const url = `https://discord.com/api/v10/webhooks/${clientId}/${body.token}/messages/@original`;
       const resp = await fetch(url, {
@@ -258,6 +255,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bot ${token}`,
+          'User-Agent': 'DiscordBot (https://discord.js.org, 14.16.3)',
         },
         body: JSON.stringify(toJsonBody(payload)),
       });
