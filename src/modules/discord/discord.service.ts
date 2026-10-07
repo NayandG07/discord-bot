@@ -26,6 +26,8 @@ import * as crypto from 'crypto';
 @Injectable()
 export class DiscordService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DiscordService.name);
+  private readonly httpCommandTimeoutMs = 120_000;
+  private readonly externalOperationTimeoutMs = 30_000;
   private client: Client;
 
   constructor(
@@ -120,7 +122,14 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     };
 
     const editReply = async (payload: any) => {
-      await rest.patch(Routes.webhookMessage(clientId, body.token), normalizePayload(payload));
+      this.logger.log(`Sending HTTP interaction follow-up for /${body.data?.name ?? 'unknown'}.`);
+      try {
+        await rest.patch(Routes.webhookMessage(clientId, body.token), normalizePayload(payload));
+        this.logger.log(`HTTP interaction follow-up sent for /${body.data?.name ?? 'unknown'}.`);
+      } catch (err: any) {
+        this.logger.error(`Failed to send HTTP interaction follow-up for /${body.data?.name ?? 'unknown'}: ${err.message}`, err.stack);
+        throw err;
+      }
     };
 
     const mockInteraction: any = {
@@ -155,7 +164,33 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       isButton: () => false,
     };
 
-    await this.handleSlashCommand(mockInteraction as ChatInputCommandInteraction);
+    try {
+      await this.withTimeout(
+        this.handleSlashCommand(mockInteraction as ChatInputCommandInteraction),
+        this.httpCommandTimeoutMs,
+        `HTTP /${body.data?.name ?? 'unknown'} command`,
+      );
+    } catch (err: any) {
+      this.logger.error(`HTTP slash command /${body.data?.name ?? 'unknown'} failed: ${err.message}`, err.stack);
+      try {
+        await editReply({ content: '⚠️ The command timed out or failed while processing. Please try again.' });
+      } catch {
+        // The original interaction token may also have expired or been rejected.
+      }
+    }
+  }
+
+  private async withTimeout<T>(operation: Promise<T>, timeoutMs: number, operationName: string): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${operationName} exceeded ${timeoutMs}ms`)), timeoutMs);
+    });
+
+    try {
+      return await Promise.race([operation, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   /**
@@ -402,6 +437,8 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
           .setStyle(ButtonStyle.Success),
       );
 
+      await interaction.editReply({ embeds: [embed], components: [row] });
+
     } else if (commandName === 'sync') {
       try {
         await interaction.deferReply({ flags: 64 });
@@ -422,12 +459,20 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       }
 
       try {
-        const submissions = await this.leetcode.fetchRecentSubmissions(user.leetCodeProfile.username, 15);
+        const submissions = await this.withTimeout(
+          this.leetcode.fetchRecentSubmissions(user.leetCodeProfile.username, 15),
+          this.externalOperationTimeoutMs,
+          'LeetCode submission fetch',
+        );
         const accepted = submissions.filter((s) => s.statusDisplay === 'Accepted');
         let newCount = 0;
 
         for (const sub of accepted) {
-          const details = await this.leetcode.fetchQuestionDetails(sub.titleSlug);
+          const details = await this.withTimeout(
+            this.leetcode.fetchQuestionDetails(sub.titleSlug),
+            this.externalOperationTimeoutMs,
+            `LeetCode question fetch for ${sub.titleSlug}`,
+          );
           if (!details) continue;
 
           const diff = details.difficulty.toUpperCase() as ProblemDifficulty;
@@ -501,7 +546,11 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       const sub = interaction.options.getSubcommand();
       if (sub === 'daily' && interaction.guildId) {
         await interaction.deferReply();
-        const summary = await this.recap.generateDailyGuildRecap(interaction.guildId);
+        const summary = await this.withTimeout(
+          this.recap.generateDailyGuildRecap(interaction.guildId),
+          this.externalOperationTimeoutMs,
+          'Daily recap generation',
+        );
         await interaction.editReply({
           content: `📊 **Daily Guild Recap**:\nTotal Solves: **${summary.totalSolves}** across **${summary.activeSolversCount}** members!\nXP Earned: **+${summary.totalXpEarned} XP**`,
         });
@@ -514,10 +563,18 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         }
 
         const now = new Date();
-        const buffer = await this.recap.generateMonthlyWrappedCard(user.id, now.getFullYear(), now.getMonth() + 1);
+        const buffer = await this.withTimeout(
+          this.recap.generateMonthlyWrappedCard(user.id, now.getFullYear(), now.getMonth() + 1),
+          this.externalOperationTimeoutMs,
+          'Monthly wrapped recap generation',
+        );
         await interaction.editReply({
           content: `✨ **Here is your Monthly Wrapped, ${interaction.user.username}!**`,
           files: [{ attachment: buffer, name: `wrapped-${user.username}.png` }],
+        });
+      } else {
+        await interaction.editReply({
+          content: '❌ Please choose a valid recap option: `daily` or `wrapped`.',
         });
       }
     } else {
