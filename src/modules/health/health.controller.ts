@@ -120,4 +120,18 @@ export class HealthController {
 
     return res.status(result.success ? HttpStatus.OK : HttpStatus.BAD_GATEWAY).json(result);
   }
+
+  @Get('test-alert')
+  @ApiOperation({ summary: 'Diagnostics endpoint to test alert broadcast to #bot-alerts via webhook/proxy' })
+  async testAlert(@Res() res: Response) {
+    try {
+      await this.discord.sendMessageToChannel('1557083415063560202', {
+        content: '🔔 **Diagnostic Test Alert from Render!** <@&1557402103968829440>',
+        allowed_mentions: { roles: ['1557402103968829440'] },
+      });
+      return res.status(HttpStatus.OK).json({ success: true, message: 'Alert delivered successfully to #bot-alerts' });
+    } catch (err: any) {
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ success: false, error: err.message });
+    }
+  }
 }

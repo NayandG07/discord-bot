@@ -31,6 +31,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   private readonly externalOperationTimeoutMs = 30_000;
   private readonly httpFollowUpTimeoutMs = 10_000;
   private client: Client;
+  private devRoleCache = new Map<string, string>();
 
   constructor(
     private readonly config: ConfigService,
@@ -894,7 +895,12 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
           'Daily recap generation',
         );
         const embed = DiscordEmbeds.createDailyRecapEmbed(summary);
-        await interaction.editReply({ embeds: [embed] });
+        const { mention, roleId } = await this.getDevRoleMention(interaction.guildId);
+        await interaction.editReply({
+          content: `📢 **Daily Guild Digest!** ${mention}`,
+          embeds: [embed],
+          allowed_mentions: roleId ? { roles: [roleId] } : { parse: ['roles'] },
+        } as any);
       } else if (sub === 'wrapped') {
         await interaction.deferReply();
         const user = await this.prisma.user.findUnique({ where: { discordId: interaction.user.id } });
@@ -1167,22 +1173,12 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         if (notifConfig && notifConfig.enableActivityAlerts && notifConfig.activityChannelId) {
           try {
             const embed = DiscordEmbeds.createSolveAlertEmbed(user, event);
-            let roleMention = '@DEV';
-
-            try {
-              const guildObj = await this.client.guilds.fetch(membership.guild.discordGuildId).catch(() => null);
-              if (guildObj) {
-                const roles = await guildObj.roles.fetch().catch(() => null);
-                const devRole = roles?.find((r) => r.name.toLowerCase() === 'dev');
-                if (devRole) roleMention = `<@&${devRole.id}>`;
-              }
-            } catch {
-              // fallback to '@DEV'
-            }
+            const { mention, roleId } = await this.getDevRoleMention(membership.guild.discordGuildId);
 
             await this.sendMessageToChannel(notifConfig.activityChannelId, {
-              content: `🔔 **Problem Solved Alert!** ${roleMention}`,
+              content: `🔔 **Problem Solved Alert!** ${mention}`,
               embeds: [embed],
+              allowed_mentions: roleId ? { roles: [roleId] } : { parse: ['roles'] },
             });
 
             this.logger.log(`Broadcasted solve alert for ${user.username} to channel ${notifConfig.activityChannelId}`);
@@ -1252,6 +1248,154 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Resolves the DEV role mention and role ID for a guild, with in-memory caching and fallbacks.
+   */
+  async getDevRoleMention(guildDiscordId?: string): Promise<{ mention: string; roleId?: string }> {
+    const configuredRoleId = this.config.get<string>('DISCORD_DEV_ROLE_ID')?.trim();
+    if (configuredRoleId) {
+      return { mention: `<@&${configuredRoleId}>`, roleId: configuredRoleId };
+    }
+
+    if (guildDiscordId && this.devRoleCache.has(guildDiscordId)) {
+      const cached = this.devRoleCache.get(guildDiscordId)!;
+      return { mention: `<@&${cached}>`, roleId: cached };
+    }
+
+    try {
+      if (guildDiscordId && this.client.isReady()) {
+        const guildObj = await this.client.guilds.fetch(guildDiscordId).catch(() => null);
+        if (guildObj) {
+          const roles = await guildObj.roles.fetch().catch(() => null);
+          const devRole = roles?.find((r) => r.name.toLowerCase() === 'dev');
+          if (devRole) {
+            this.devRoleCache.set(guildDiscordId, devRole.id);
+            return { mention: `<@&${devRole.id}>`, roleId: devRole.id };
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // Default known DEV role ID in the OnlyPlans guild
+    const knownDefault = '1557402103968829440';
+    return { mention: `<@&${knownDefault}>`, roleId: knownDefault };
+  }
+
+  /**
+   * Returns a configured webhook URL for an alert channel.
+   * Enables complete bypass of Cloudflare Error 1015 IP rate limits on Render.
+   */
+  getWebhookUrlForChannel(channelId: string): string | null {
+    const envWebhook = this.config.get<string>('DISCORD_ALERT_WEBHOOK_URL')?.trim();
+    if (envWebhook) return envWebhook;
+
+    // Primary alert channel for OnlyPlans guild
+    if (channelId === '1557083415063560202') {
+      return 'https://discord.com/api/webhooks/1557411392020156436/Bl_1NuZN4A8Pjy2o832UrsF3MczdWJZ48iMDrMsqfd3UA4iiXY5rwjzt3gqKbNUVTHVr';
+    }
+    return null;
+  }
+
+  /**
+   * Delivers a webhook message to Discord, routing through a proxy host if direct Cloudflare egress is rate limited.
+   */
+  async sendWebhookMessage(
+    webhookUrl: string,
+    payload: { content?: string; embeds?: any[]; allowed_mentions?: any },
+  ): Promise<boolean> {
+    const jsonBody: any = {
+      content: payload.content,
+      embeds: payload.embeds?.map((e: any) => typeof e?.toJSON === 'function' ? e.toJSON() : e),
+    };
+    if (payload.allowed_mentions) {
+      jsonBody.allowed_mentions = payload.allowed_mentions;
+    }
+    const jsonStr = JSON.stringify(jsonBody);
+
+    let parsedPath = '/api/webhooks/';
+    try {
+      const u = new URL(webhookUrl);
+      parsedPath = u.pathname;
+    } catch {
+      parsedPath = webhookUrl;
+    }
+
+    const proxyHost = this.config.get<string>('DISCORD_WEBHOOK_PROXY_HOST')?.trim() || 'webhook.lewisakura.moe';
+
+    // 1. Try proxy host first (bypasses Cloudflare 1015 on Render)
+    const proxySuccess = await this.executeHttpsPost(proxyHost, parsedPath, jsonStr);
+    if (proxySuccess) {
+      this.logger.log(`Webhook message delivered via proxy (${proxyHost}).`);
+      return true;
+    }
+
+    // 2. Fallback to direct discord.com
+    this.logger.warn(`Proxy delivery failed. Falling back to direct discord.com...`);
+    return await this.executeHttpsPost('discord.com', parsedPath, jsonStr);
+  }
+
+  private executeHttpsPost(
+    hostname: string,
+    path: string,
+    jsonStr: string,
+    authHeader?: string,
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      import('https').then((https) => {
+        const headers: Record<string, string | number> = {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(jsonStr),
+          'User-Agent': 'DiscordBot (https://discord.js.org, 14.16.3)',
+          'Accept': 'application/json',
+        };
+        if (authHeader) {
+          headers['Authorization'] = authHeader;
+        }
+
+        const req = https.request(
+          {
+            hostname,
+            port: 443,
+            path,
+            method: 'POST',
+            headers,
+            family: 4,
+            timeout: 8000,
+          },
+          (res: any) => {
+            let data = '';
+            res.on('data', (chunk: any) => (data += chunk));
+            res.on('end', () => {
+              if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                resolve(true);
+              } else {
+                this.logger.warn(`HTTPS POST to ${hostname}${path} returned ${res.statusCode}: ${data}`);
+                resolve(false);
+              }
+            });
+          },
+        );
+
+        req.on('timeout', () => {
+          req.destroy();
+          resolve(false);
+        });
+        req.on('error', (err: any) => {
+          this.logger.warn(`HTTPS POST to ${hostname}${path} failed: ${err.message}`);
+          resolve(false);
+        });
+
+        req.write(jsonStr);
+        req.end();
+      }).catch((err) => {
+        this.logger.error(`Failed to load https module: ${err.message}`);
+        resolve(false);
+      });
+    });
+  }
+
   async broadcastDailyRecapToAllGuilds() {
     try {
       const configs = await this.prisma.notificationConfig.findMany({
@@ -1267,22 +1411,12 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         try {
           const summary = await this.recap.generateDailyGuildRecap(conf.guildId);
           const embed = DiscordEmbeds.createDailyRecapEmbed(summary);
-
-          let roleMention = '@DEV';
-          try {
-            const guildObj = await this.client.guilds.fetch(conf.guild.discordGuildId).catch(() => null);
-            if (guildObj) {
-              const roles = await guildObj.roles.fetch().catch(() => null);
-              const devRole = roles?.find((r) => r.name.toLowerCase() === 'dev');
-              if (devRole) roleMention = `<@&${devRole.id}>`;
-            }
-          } catch {
-            // fallback to '@DEV'
-          }
+          const { mention, roleId } = await this.getDevRoleMention(conf.guild.discordGuildId);
 
           await this.sendMessageToChannel(conf.recapChannelId, {
-            content: `📢 **Daily Guild Digest!** ${roleMention}`,
+            content: `📢 **Daily Guild Digest!** ${mention}`,
             embeds: [embed],
+            allowed_mentions: roleId ? { roles: [roleId] } : { parse: ['roles'] },
           });
           this.logger.log(`Broadcasted daily recap to guild ${conf.guild.name}`);
         } catch (err: any) {
@@ -1295,67 +1429,44 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Resilient channel message delivery: tries discord.js client first,
-   * falls back to direct native HTTPS if the client/Gateway is unavailable.
+   * Resilient channel message delivery:
+   * 1. If client is connected to Gateway, delivers through discord.js channel client.
+   * 2. If client/Gateway is unavailable (e.g. Cloudflare 1015 on Render), uses Webhook delivery (proxied via lewisakura to bypass Cloudflare IP bans).
+   * 3. Falls back to direct native HTTPS POST to Discord API.
    */
-  async sendMessageToChannel(channelId: string, payload: { content?: string; embeds?: any[] }): Promise<void> {
-    try {
-      const channel = await this.client.channels.fetch(channelId).catch(() => null);
-      if (channel && channel.isTextBased()) {
-        await (channel as any).send(payload);
-        return;
+  async sendMessageToChannel(
+    channelId: string,
+    payload: { content?: string; embeds?: any[]; allowed_mentions?: any },
+  ): Promise<void> {
+    // 1. Try discord.js Gateway client if ready
+    if (this.client?.isReady?.()) {
+      try {
+        const channel = await this.client.channels.fetch(channelId).catch(() => null);
+        if (channel && channel.isTextBased()) {
+          await (channel as any).send(payload);
+          return;
+        }
+      } catch (err: any) {
+        this.logger.warn(`client.channels.send failed for ${channelId}: ${err.message}. Trying webhook / direct HTTP...`);
       }
-    } catch (err: any) {
-      this.logger.warn(`client.channels.send failed for ${channelId}: ${err.message}. Trying direct HTTPS...`);
     }
 
+    // 2. Try Discord Webhook (bypasses Cloudflare Error 1015 on Render)
+    const webhookUrl = this.getWebhookUrlForChannel(channelId);
+    if (webhookUrl) {
+      const webhookSuccess = await this.sendWebhookMessage(webhookUrl, payload);
+      if (webhookSuccess) return;
+    }
+
+    // 3. Fallback to direct REST API
     const token = this.config.get<string>('DISCORD_BOT_TOKEN')?.trim().replace(/^["']|["']$/g, '') ?? '';
-    const https = await import('https');
     const jsonBody = {
       content: payload.content,
       embeds: payload.embeds?.map((e: any) => typeof e?.toJSON === 'function' ? e.toJSON() : e),
+      allowed_mentions: payload.allowed_mentions,
     };
     const jsonStr = JSON.stringify(jsonBody);
 
-    return new Promise((resolve) => {
-      const req = https.request({
-        hostname: 'discord.com',
-        port: 443,
-        path: `/api/v10/channels/${channelId}/messages`,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(jsonStr),
-          'Authorization': `Bot ${token}`,
-          'User-Agent': 'DiscordBot (https://discord.js.org, 14.16.3)',
-          'Accept': 'application/json',
-        },
-        family: 4,
-        timeout: 8000,
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-            resolve();
-          } else {
-            this.logger.warn(`Direct HTTPS message to ${channelId} returned status ${res.statusCode}: ${data}`);
-            resolve();
-          }
-        });
-      });
-
-      req.on('timeout', () => {
-        req.destroy();
-        resolve();
-      });
-      req.on('error', (err) => {
-        this.logger.warn(`Direct HTTPS message error: ${err.message}`);
-        resolve();
-      });
-
-      req.write(jsonStr);
-      req.end();
-    });
+    await this.executeHttpsPost('discord.com', `/api/v10/channels/${channelId}/messages`, jsonStr, `Bot ${token}`);
   }
 }
