@@ -92,7 +92,6 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   async handleHttpSlashCommand(body: any): Promise<void> {
     const token = this.config.get<string>('DISCORD_BOT_TOKEN')?.trim().replace(/^["']|["']$/g, '') ?? '';
     const clientId = this.config.get<string>('DISCORD_CLIENT_ID')?.trim() ?? '';
-    const rest = new REST({ version: '10' }).setToken(token);
 
     const guildId = body.guild_id ?? null;
     const userId = body.member?.user?.id ?? body.user?.id ?? '';
@@ -109,28 +108,61 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const normalizePayload = (payload: any) => {
-      if (typeof payload === 'string') {
-        return { body: { content: payload } };
-      }
+    const toJsonBody = (payload: any): object => {
+      if (typeof payload === 'string') return { content: payload };
       if (payload && typeof payload === 'object') {
-        const { files, ...restBody } = payload;
-        const optionsData: any = { body: restBody };
-        if (files) optionsData.files = files;
-        return optionsData;
+        const { files, ...rest } = payload;
+        return rest;
       }
-      return { body: {} };
+      return {};
+    };
+
+    /**
+     * Use native fetch (Node 18+) instead of discord.js undici-based REST.
+     * discord.js undici hangs silently on Render's network for outbound HTTPS;
+     * native fetch works reliably for the same calls.
+     */
+    const discordPatch = async (url: string, jsonBody: object): Promise<void> => {
+      const resp = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bot ${token}`,
+        },
+        body: JSON.stringify(jsonBody),
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => resp.status.toString());
+        throw new Error(`Discord PATCH ${url} failed: ${resp.status} ${text}`);
+      }
+    };
+
+    const discordPost = async (url: string, jsonBody: object): Promise<void> => {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bot ${token}`,
+        },
+        body: JSON.stringify(jsonBody),
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => resp.status.toString());
+        throw new Error(`Discord POST ${url} failed: ${resp.status} ${text}`);
+      }
     };
 
     const editReply = async (payload: any) => {
-      this.logger.log(`Sending HTTP interaction follow-up for /${body.data?.name ?? 'unknown'}.`);
+      const cmdName = body.data?.name ?? 'unknown';
+      this.logger.log(`Sending HTTP interaction follow-up for /${cmdName}.`);
       try {
+        const url = `https://discord.com/api/v10/webhooks/${clientId}/${body.token}/messages/@original`;
         await this.withTimeout(
-          rest.patch(Routes.webhookMessage(clientId, body.token), normalizePayload(payload)),
+          discordPatch(url, toJsonBody(payload)),
           this.httpFollowUpTimeoutMs,
-          `Discord /${body.data?.name ?? 'unknown'} follow-up`,
+          `Discord /${cmdName} follow-up`,
         );
-        this.logger.log(`HTTP interaction follow-up sent for /${body.data?.name ?? 'unknown'}.`);
+        this.logger.log(`HTTP interaction follow-up sent for /${cmdName}.`);
       } catch (err: any) {
         this.logger.error(`Failed to send HTTP interaction follow-up for /${body.data?.name ?? 'unknown'}: ${err.message}`, err.stack);
         throw err;
@@ -162,7 +194,8 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       reply: async (payload: any) => editReply(payload),
       editReply: async (payload: any) => editReply(payload),
       followUp: async (payload: any) => {
-        await rest.post(Routes.webhook(clientId, body.token), normalizePayload(payload));
+        const url = `https://discord.com/api/v10/webhooks/${clientId}/${body.token}`;
+        await discordPost(url, toJsonBody(payload));
       },
       isRepliable: () => true,
       isChatInputCommand: () => true,
@@ -204,26 +237,34 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   async handleHttpComponentInteraction(body: any): Promise<void> {
     const token = this.config.get<string>('DISCORD_BOT_TOKEN')?.trim().replace(/^["']|["']$/g, '') ?? '';
     const clientId = this.config.get<string>('DISCORD_CLIENT_ID')?.trim() ?? '';
-    const rest = new REST({ version: '10' }).setToken(token);
 
     const userId = body.member?.user?.id ?? body.user?.id ?? '';
     const username = body.member?.user?.username ?? body.user?.username ?? '';
 
-    const normalizePayload = (payload: any) => {
-      if (typeof payload === 'string') {
-        return { body: { content: payload } };
-      }
+    const toJsonBody = (payload: any): object => {
+      if (typeof payload === 'string') return { content: payload };
       if (payload && typeof payload === 'object') {
-        const { files, ...restBody } = payload;
-        const optionsData: any = { body: restBody };
-        if (files) optionsData.files = files;
-        return optionsData;
+        const { files, ...rest } = payload;
+        return rest;
       }
-      return { body: {} };
+      return {};
     };
 
+    // Use native fetch — same reason as handleHttpSlashCommand (undici hangs on Render)
     const editReply = async (payload: any) => {
-      await rest.patch(Routes.webhookMessage(clientId, body.token), normalizePayload(payload));
+      const url = `https://discord.com/api/v10/webhooks/${clientId}/${body.token}/messages/@original`;
+      const resp = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bot ${token}`,
+        },
+        body: JSON.stringify(toJsonBody(payload)),
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => resp.status.toString());
+        throw new Error(`Discord PATCH component reply failed: ${resp.status} ${text}`);
+      }
     };
 
     const mockInteraction: any = {
