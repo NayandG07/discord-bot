@@ -58,17 +58,12 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   private async initDiscord(token: string) {
     try {
       this.logger.log(`TOKEN_DEBUG: length=${token.length}, prefix="${token.substring(0, 12)}", suffix="${token.substring(token.length - 6)}"`);
+      this.client.rest.setToken(token);
+
       this.logger.log(`Connecting DevGuild to Discord Gateway (token prefix: ${token.substring(0, 8)}...)...`);
+      await this.client.login(token);
+      this.logger.log(`Discord Gateway connected successfully! Tag: ${this.client.user?.tag}`);
 
-      // Race login against a 30s timeout to detect silent WebSocket hangs (common on Render free tier)
-      await Promise.race([
-        this.client.login(token),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Discord Gateway login timed out after 30 seconds. WebSocket to wss://gateway.discord.gg may be blocked on this host.')), 30_000),
-        ),
-      ]);
-
-      this.logger.log(`Discord login successful. Tag: ${this.client.user?.tag}`);
       await this.registerSlashCommands();
     } catch (err: any) {
       this.logger.error(`Failed to initialize Discord client: ${err.message}`, err.stack);
@@ -85,6 +80,129 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   getClient(): Client {
     return this.client;
   }
+
+  /**
+   * Builds a lightweight mock interaction object from raw Discord HTTP payload,
+   * then dispatches it to the existing slash command handler.
+   * This allows all command logic to work identically in both Gateway and HTTP modes.
+   */
+  async handleHttpSlashCommand(body: any): Promise<void> {
+    const token = this.config.get<string>('DISCORD_BOT_TOKEN')?.trim().replace(/^["']|["']$/g, '') ?? '';
+    const clientId = this.config.get<string>('DISCORD_CLIENT_ID')?.trim() ?? '';
+    const rest = new REST({ version: '10' }).setToken(token);
+
+    const guildId = body.guild_id ?? null;
+    const userId = body.member?.user?.id ?? body.user?.id ?? '';
+    const username = body.member?.user?.username ?? body.user?.username ?? '';
+    const rawOptions: any[] = body.data?.options ?? [];
+
+    // Flatten options if command has subcommands (e.g. /recap daily)
+    const options: any[] = [];
+    for (const opt of rawOptions) {
+      if (opt.type === 1 && Array.isArray(opt.options)) {
+        options.push(...opt.options);
+      } else {
+        options.push(opt);
+      }
+    }
+
+    const normalizePayload = (payload: any) => {
+      if (typeof payload === 'string') {
+        return { body: { content: payload } };
+      }
+      if (payload && typeof payload === 'object') {
+        const { files, ...restBody } = payload;
+        const optionsData: any = { body: restBody };
+        if (files) optionsData.files = files;
+        return optionsData;
+      }
+      return { body: {} };
+    };
+
+    const editReply = async (payload: any) => {
+      await rest.patch(Routes.webhookMessage(clientId, body.token), normalizePayload(payload));
+    };
+
+    const mockInteraction: any = {
+      commandName: body.data?.name,
+      guildId,
+      guild: guildId ? { id: guildId, name: body.guild?.name ?? guildId, iconURL: () => null } : null,
+      user: { id: userId, username },
+      deferred: true,
+      replied: false,
+      options: {
+        getString: (name: string, required = false) => options.find((o) => o.name === name)?.value ?? null,
+        getChannel: (name: string) => {
+          const opt = options.find((o) => o.name === name);
+          if (!opt) return null;
+          return { id: opt.value, name: `channel-${opt.value}` };
+        },
+        getUser: (name: string) => {
+          const opt = options.find((o) => o.name === name);
+          if (!opt) return null;
+          return { id: opt.value, username: body.data?.resolved?.users?.[opt.value]?.username ?? opt.value };
+        },
+        getSubcommand: () => rawOptions.find((o) => o.type === 1)?.name ?? null,
+      },
+      deferReply: async () => { /* already deferred via HTTP type=5 */ },
+      reply: async (payload: any) => editReply(payload),
+      editReply: async (payload: any) => editReply(payload),
+      followUp: async (payload: any) => {
+        await rest.post(Routes.webhook(clientId, body.token), normalizePayload(payload));
+      },
+      isRepliable: () => true,
+      isChatInputCommand: () => true,
+      isButton: () => false,
+    };
+
+    await this.handleSlashCommand(mockInteraction as ChatInputCommandInteraction);
+  }
+
+  /**
+   * Handles button/component interactions arriving via HTTP.
+   */
+  async handleHttpComponentInteraction(body: any): Promise<void> {
+    const token = this.config.get<string>('DISCORD_BOT_TOKEN')?.trim().replace(/^["']|["']$/g, '') ?? '';
+    const clientId = this.config.get<string>('DISCORD_CLIENT_ID')?.trim() ?? '';
+    const rest = new REST({ version: '10' }).setToken(token);
+
+    const userId = body.member?.user?.id ?? body.user?.id ?? '';
+    const username = body.member?.user?.username ?? body.user?.username ?? '';
+
+    const normalizePayload = (payload: any) => {
+      if (typeof payload === 'string') {
+        return { body: { content: payload } };
+      }
+      if (payload && typeof payload === 'object') {
+        const { files, ...restBody } = payload;
+        const optionsData: any = { body: restBody };
+        if (files) optionsData.files = files;
+        return optionsData;
+      }
+      return { body: {} };
+    };
+
+    const editReply = async (payload: any) => {
+      await rest.patch(Routes.webhookMessage(clientId, body.token), normalizePayload(payload));
+    };
+
+    const mockInteraction: any = {
+      customId: body.data?.custom_id,
+      user: { id: userId, username },
+      deferred: true,
+      replied: false,
+      deferReply: async () => { /* already deferred via HTTP type=5 */ },
+      deferUpdate: async () => { /* already deferred */ },
+      editReply: async (payload: any) => editReply(payload),
+      reply: async (payload: any) => editReply(payload),
+      isRepliable: () => true,
+      isButton: () => true,
+      isChatInputCommand: () => false,
+    };
+
+    await this.handleButtonInteraction(mockInteraction as ButtonInteraction);
+  }
+
 
   private async registerSlashCommands() {
     const rawToken = this.config.get<string>('DISCORD_BOT_TOKEN');

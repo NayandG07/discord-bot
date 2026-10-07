@@ -5,7 +5,9 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const logger = new Logger('DevGuildBootstrap');
-  const app = await NestFactory.create(AppModule);
+  // rawBody:true is required so the Discord interactions controller can verify
+  // Ed25519 signatures (Discord signs the exact raw request bytes).
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   app.enableCors({
     origin: true,
