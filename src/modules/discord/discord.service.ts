@@ -91,7 +91,9 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
    */
   async handleHttpSlashCommand(body: any): Promise<void> {
     const token = this.config.get<string>('DISCORD_BOT_TOKEN')?.trim().replace(/^["']|["']$/g, '') ?? '';
-    const clientId = this.config.get<string>('DISCORD_CLIENT_ID')?.trim() ?? '';
+    const rawClientId = this.config.get<string>('DISCORD_CLIENT_ID')?.trim().replace(/^["']|["']$/g, '');
+    const appId = body.application_id || rawClientId || '1557065263575343145';
+    const rest = new REST({ version: '10' }).setToken(token);
 
     const guildId = body.guild_id ?? null;
     const userId = body.member?.user?.id ?? body.user?.id ?? '';
@@ -108,61 +110,56 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    const normalizePayload = (payload: any) => {
+      if (typeof payload === 'string') {
+        return { body: { content: payload } };
+      }
+      if (payload && typeof payload === 'object') {
+        const { files, ...restBody } = payload;
+        const optionsData: any = { body: restBody };
+        if (files) optionsData.files = files;
+        return optionsData;
+      }
+      return { body: {} };
+    };
+
     const toJsonBody = (payload: any): object => {
       if (typeof payload === 'string') return { content: payload };
       if (payload && typeof payload === 'object') {
-        const { files, ...rest } = payload;
-        return rest;
+        const { files, ...restBody } = payload;
+        const bodyObj: any = { ...restBody };
+        if (Array.isArray(bodyObj.embeds)) {
+          bodyObj.embeds = bodyObj.embeds.map((e: any) => typeof e?.toJSON === 'function' ? e.toJSON() : e);
+        }
+        if (Array.isArray(bodyObj.components)) {
+          bodyObj.components = bodyObj.components.map((c: any) => typeof c?.toJSON === 'function' ? c.toJSON() : c);
+        }
+        return bodyObj;
       }
       return {};
-    };
-
-    // Cloudflare (which protects discord.com) requires the Discord bot User-Agent.
-    // Without it, outbound requests from data-center IPs (like Render) get an HTML challenge page.
-    const DISCORD_HEADERS = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bot ${token}`,
-      'User-Agent': 'DiscordBot (https://discord.js.org, 14.16.3)',
-    };
-
-    const discordPatch = async (url: string, jsonBody: object): Promise<void> => {
-      const resp = await fetch(url, {
-        method: 'PATCH',
-        headers: DISCORD_HEADERS,
-        body: JSON.stringify(jsonBody),
-      });
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => resp.status.toString());
-        throw new Error(`Discord PATCH ${url} failed: ${resp.status} ${text}`);
-      }
-    };
-
-    const discordPost = async (url: string, jsonBody: object): Promise<void> => {
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: DISCORD_HEADERS,
-        body: JSON.stringify(jsonBody),
-      });
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => resp.status.toString());
-        throw new Error(`Discord POST ${url} failed: ${resp.status} ${text}`);
-      }
     };
 
     const editReply = async (payload: any) => {
       const cmdName = body.data?.name ?? 'unknown';
       this.logger.log(`Sending HTTP interaction follow-up for /${cmdName}.`);
+      const restPayload = normalizePayload(payload);
+
       try {
-        const url = `https://discord.com/api/v10/webhooks/${clientId}/${body.token}/messages/@original`;
         await this.withTimeout(
-          discordPatch(url, toJsonBody(payload)),
+          rest.patch(Routes.webhookMessage(appId, body.token), { ...restPayload, auth: false }),
           this.httpFollowUpTimeoutMs,
           `Discord /${cmdName} follow-up`,
         );
-        this.logger.log(`HTTP interaction follow-up sent for /${cmdName}.`);
+        this.logger.log(`HTTP interaction follow-up sent via REST for /${cmdName}.`);
       } catch (err: any) {
-        this.logger.error(`Failed to send HTTP interaction follow-up for /${body.data?.name ?? 'unknown'}: ${err.message}`, err.stack);
-        throw err;
+        this.logger.warn(`rest.patch failed for /${cmdName} (${err.message}). Trying native HTTPS IPv4 fallback...`);
+        try {
+          await this.sendDirectDiscordWebhook(appId, body.token, '@original', 'PATCH', toJsonBody(payload));
+          this.logger.log(`HTTP interaction follow-up sent via native HTTPS fallback for /${cmdName}.`);
+        } catch (fallbackErr: any) {
+          this.logger.error(`All follow-up channels failed for /${cmdName}: ${fallbackErr.message}`, fallbackErr.stack);
+          throw fallbackErr;
+        }
       }
     };
 
@@ -191,8 +188,11 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       reply: async (payload: any) => editReply(payload),
       editReply: async (payload: any) => editReply(payload),
       followUp: async (payload: any) => {
-        const url = `https://discord.com/api/v10/webhooks/${clientId}/${body.token}`;
-        await discordPost(url, toJsonBody(payload));
+        try {
+          await rest.post(Routes.webhook(appId, body.token), { ...normalizePayload(payload), auth: false });
+        } catch {
+          await this.sendDirectDiscordWebhook(appId, body.token, '', 'POST', toJsonBody(payload));
+        }
       },
       isRepliable: () => true,
       isChatInputCommand: () => true,
@@ -233,35 +233,48 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
    */
   async handleHttpComponentInteraction(body: any): Promise<void> {
     const token = this.config.get<string>('DISCORD_BOT_TOKEN')?.trim().replace(/^["']|["']$/g, '') ?? '';
-    const clientId = this.config.get<string>('DISCORD_CLIENT_ID')?.trim() ?? '';
+    const rawClientId = this.config.get<string>('DISCORD_CLIENT_ID')?.trim().replace(/^["']|["']$/g, '');
+    const appId = body.application_id || rawClientId || '1557065263575343145';
+    const rest = new REST({ version: '10' }).setToken(token);
 
     const userId = body.member?.user?.id ?? body.user?.id ?? '';
     const username = body.member?.user?.username ?? body.user?.username ?? '';
 
+    const normalizePayload = (payload: any) => {
+      if (typeof payload === 'string') {
+        return { body: { content: payload } };
+      }
+      if (payload && typeof payload === 'object') {
+        const { files, ...restBody } = payload;
+        const optionsData: any = { body: restBody };
+        if (files) optionsData.files = files;
+        return optionsData;
+      }
+      return { body: {} };
+    };
+
     const toJsonBody = (payload: any): object => {
       if (typeof payload === 'string') return { content: payload };
       if (payload && typeof payload === 'object') {
-        const { files, ...rest } = payload;
-        return rest;
+        const { files, ...restBody } = payload;
+        const bodyObj: any = { ...restBody };
+        if (Array.isArray(bodyObj.embeds)) {
+          bodyObj.embeds = bodyObj.embeds.map((e: any) => typeof e?.toJSON === 'function' ? e.toJSON() : e);
+        }
+        if (Array.isArray(bodyObj.components)) {
+          bodyObj.components = bodyObj.components.map((c: any) => typeof c?.toJSON === 'function' ? c.toJSON() : c);
+        }
+        return bodyObj;
       }
       return {};
     };
 
-    // Use native fetch with proper Discord bot User-Agent so Cloudflare doesn't block it
     const editReply = async (payload: any) => {
-      const url = `https://discord.com/api/v10/webhooks/${clientId}/${body.token}/messages/@original`;
-      const resp = await fetch(url, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bot ${token}`,
-          'User-Agent': 'DiscordBot (https://discord.js.org, 14.16.3)',
-        },
-        body: JSON.stringify(toJsonBody(payload)),
-      });
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => resp.status.toString());
-        throw new Error(`Discord PATCH component reply failed: ${resp.status} ${text}`);
+      try {
+        await rest.patch(Routes.webhookMessage(appId, body.token), { ...normalizePayload(payload), auth: false });
+      } catch (err: any) {
+        this.logger.warn(`Component rest.patch failed (${err.message}). Trying native HTTPS fallback...`);
+        await this.sendDirectDiscordWebhook(appId, body.token, '@original', 'PATCH', toJsonBody(payload));
       }
     };
 
@@ -280,6 +293,63 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     };
 
     await this.handleButtonInteraction(mockInteraction as ButtonInteraction);
+  }
+
+  /**
+   * Native IPv4 HTTPS delivery for Discord interaction webhooks.
+   * Completely independent of undici / discord.js connection pool to eliminate hangs on Render.
+   */
+  private sendDirectDiscordWebhook(
+    appId: string,
+    interactionToken: string,
+    messageId: string,
+    method: 'PATCH' | 'POST',
+    body: object,
+  ): Promise<void> {
+    if (!/^\d+$/.test(appId)) {
+      this.logger.warn(`Skipping direct webhook delivery: invalid snowflake appId "${appId}"`);
+      return Promise.resolve();
+    }
+    return new Promise(async (resolve, reject) => {
+      const https = await import('https');
+      const jsonStr = JSON.stringify(body);
+      const path = messageId === '@original'
+        ? `/api/v10/webhooks/${appId}/${interactionToken}/messages/@original`
+        : `/api/v10/webhooks/${appId}/${interactionToken}`;
+
+      const req = https.request({
+        hostname: 'discord.com',
+        port: 443,
+        path,
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(jsonStr),
+          'User-Agent': 'DiscordBot (https://discord.js.org, 14.16.3)',
+          'Accept': 'application/json',
+        },
+        family: 4, // Force IPv4 to prevent IPv6 SYN hang on cloud containers
+        timeout: 8000,
+      }, (res: any) => {
+        let responseData = '';
+        res.on('data', (chunk: any) => responseData += chunk);
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve();
+          } else {
+            reject(new Error(`Discord API returned ${res.statusCode}: ${responseData}`));
+          }
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy(new Error('Direct Discord HTTPS request timed out after 8000ms'));
+      });
+
+      req.on('error', reject);
+      req.write(jsonStr);
+      req.end();
+    });
   }
 
 

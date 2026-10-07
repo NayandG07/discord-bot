@@ -68,4 +68,56 @@ export class HealthController {
   ping(@Res() res: Response) {
     return res.status(HttpStatus.OK).send('OK');
   }
+
+  @Get('test-discord')
+  @ApiOperation({ summary: 'Diagnostics endpoint to test outbound HTTPS connectivity to Discord API from Render' })
+  async testDiscord(@Res() res: Response) {
+    const https = await import('https');
+    const start = Date.now();
+
+    const result: any = {
+      timestamp: new Date().toISOString(),
+      latencyMs: null,
+      status: null,
+      success: false,
+      error: null,
+      gatewayUrl: null,
+    };
+
+    try {
+      const data = await new Promise<string>((resolve, reject) => {
+        const req = https.request({
+          hostname: 'discord.com',
+          port: 443,
+          path: '/api/v10/gateway',
+          method: 'GET',
+          headers: {
+            'User-Agent': 'DiscordBot (https://discord.js.org, 14.16.3)',
+            'Accept': 'application/json',
+          },
+          family: 4, // Force IPv4
+          timeout: 8000,
+        }, (discordRes) => {
+          result.status = discordRes.statusCode;
+          let body = '';
+          discordRes.on('data', chunk => body += chunk);
+          discordRes.on('end', () => resolve(body));
+        });
+
+        req.on('timeout', () => req.destroy(new Error('Connection timed out after 8000ms')));
+        req.on('error', reject);
+        req.end();
+      });
+
+      result.latencyMs = Date.now() - start;
+      const parsed = JSON.parse(data);
+      result.gatewayUrl = parsed.url;
+      result.success = result.status === 200;
+    } catch (err: any) {
+      result.latencyMs = Date.now() - start;
+      result.error = err.message;
+    }
+
+    return res.status(result.success ? HttpStatus.OK : HttpStatus.BAD_GATEWAY).json(result);
+  }
 }
