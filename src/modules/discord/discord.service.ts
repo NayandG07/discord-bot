@@ -988,9 +988,8 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       });
 
       if (!activeBoss) {
-        await interaction.editReply({
-          content: '🛡️ **No active Boss Battle raid currently.**\nContests launch automatically during official weekly LeetCode contests! Check back on contest days or view raid damage with `/leaderboard contests`.',
-        });
+        const embed = DiscordEmbeds.createUpcomingContestsEmbed();
+        await interaction.editReply({ embeds: [embed] });
         return;
       }
 
@@ -1153,6 +1152,9 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
           content: `🛡️ **Squad Info: [${team.tag}] ${team.name}**\nLeader: **${team.leader.username}**\nTotal Members: **${team.members.length}**\n\n**Roster:**\n${memberList}`,
         });
       }
+    } else if (commandName === 'guide') {
+      const embed = DiscordEmbeds.createGuideEmbed();
+      await interaction.reply({ embeds: [embed] });
     } else {
       await interaction.reply({ content: `Command \`/${commandName}\` acknowledged!`, flags: 64 });
     }

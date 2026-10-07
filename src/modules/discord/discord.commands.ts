@@ -122,4 +122,8 @@ export const SLASH_COMMANDS = [
     .setDescription('View daily or weekly recap')
     .addSubcommand((sub) => sub.setName('daily').setDescription('View today’s solve recap'))
     .addSubcommand((sub) => sub.setName('wrapped').setDescription('Generate your Monthly Wrapped card')),
+
+  new SlashCommandBuilder()
+    .setName('guide')
+    .setDescription('Explore DevGuild features, rules, XP mechanics, and how to play'),
 ];

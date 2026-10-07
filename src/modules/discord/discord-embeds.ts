@@ -195,4 +195,91 @@ export class DiscordEmbeds {
     embed.setDescription(description);
     return embed;
   }
+
+  static createUpcomingContestsEmbed(): EmbedBuilder {
+    const now = new Date();
+
+    // Next Weekly Contest: Sunday at 02:30 UTC
+    const nextWeekly = new Date(now);
+    const daysUntilSunday = (7 - now.getUTCDay()) % 7;
+    const isSundayPastContest = daysUntilSunday === 0 && (now.getUTCHours() > 4 || (now.getUTCHours() === 4 && now.getUTCMinutes() > 0));
+    nextWeekly.setUTCDate(now.getUTCDate() + (isSundayPastContest ? 7 : daysUntilSunday));
+    nextWeekly.setUTCHours(2, 30, 0, 0);
+
+    // Next Biweekly Contest: Alternate Saturday at 14:30 UTC
+    const refBiweekly = new Date('2024-10-12T14:30:00Z').getTime();
+    const twoWeeks = 14 * 24 * 60 * 60 * 1000;
+    const diff = now.getTime() - refBiweekly;
+    const remainder = diff % twoWeeks;
+    const nextBiweekly = new Date(now.getTime() + (twoWeeks - remainder));
+
+    const weeklyUnix = Math.floor(nextWeekly.getTime() / 1000);
+    const biweeklyUnix = Math.floor(nextBiweekly.getTime() / 1000);
+
+    return new EmbedBuilder()
+      .setTitle('⚔️ LEETCODE RAID BOSS RADAR & CONTEST SCHEDULE')
+      .setColor(0xe040fb)
+      .setDescription(
+        `**No active Boss Battle raid currently in session.**\n` +
+          `Boss Battles activate automatically during official LeetCode Weekly & Biweekly Contests! Prepare your algorithms and rally your guild mates.\n\n` +
+          `**Upcoming Official Contests:**\n\n` +
+          `🏆 **Next Biweekly Contest**\n` +
+          `• Time: <t:${biweeklyUnix}:F> (<t:${biweeklyUnix}:R>)\n` +
+          `• Format: 4 algorithmic problems • 90 minutes\n\n` +
+          `🏆 **Next Weekly Contest**\n` +
+          `• Time: <t:${weeklyUnix}:F> (<t:${weeklyUnix}:R>)\n` +
+          `• Format: 4 algorithmic problems • 90 minutes\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `👹 **How Boss Battles Work**:\n` +
+          `• The server collectively fights a massive Mega Boss scaled to guild size.\n` +
+          `• Every problem you solve during the contest deals raw damage to the Boss:\n` +
+          `  - **Q1 (Easy)**: 💥 **100 DMG** (+10 XP)\n` +
+          `  - **Q2 (Medium)**: 💥 **250 DMG** (+30 XP)\n` +
+          `  - **Q3 (Medium/Hard)**: 💥 **600 DMG** (+75 XP)\n` +
+          `  - **Q4 (Hard)**: 💥 **1,500 DMG** (+150 XP)\n` +
+          `• ⚡ **Critical Strike**: Solves submitted in the first 30 minutes deal **+25% Critical Damage**!\n` +
+          `• 🏅 **Loot**: Defeating the boss awards the *Boss Slayer* role, Guild XP bonuses, and raid badges!\n\n` +
+          `*Check past raid damage with \`/leaderboard contests\`.*`,
+      )
+      .setFooter({ text: 'DevGuild Boss Battle Engine • Automated Raid Alerts' })
+      .setTimestamp();
+  }
+
+  static createGuideEmbed(): EmbedBuilder {
+    return new EmbedBuilder()
+      .setTitle('📖 DEVGUILD — ULTIMATE SURVIVAL & MASTERY GUIDE')
+      .setColor(0x5865f2)
+      .setDescription(
+        `Welcome to **DevGuild**! DevGuild turns daily LeetCode practice into an interactive, gamified RPG where consistency, teamwork, and problem-solving level you up.\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `🚀 **1. Getting Started (Setup & Linking)**\n` +
+          `• **/link \`<username>\`**: Connect your official LeetCode account.\n` +
+          `  - You’ll receive a unique verification token.\n` +
+          `  - Paste it into your LeetCode profile **"About Me"** bio and click **Verify**.\n` +
+          `• **/sync**: Instantly sync your latest solves and update your rank on the fly!\n` +
+          `• **/profile**: View your real-time stats, current streak, LeetCode contest rating, and rank tier.\n\n` +
+          `🔥 **2. Daily Streaks & XP System**\n` +
+          `• **Solve daily**: Every day you solve at least 1 problem keeps your streak alive.\n` +
+          `• **Streak Multipliers**: Earn an additional **+2% XP per day** of your active streak (up to **+50% bonus!**).\n` +
+          `• **Anti-Farming Protection**: Spamming easy questions triggers diminishing returns to encourage true skill progression.\n\n` +
+          `👹 **3. Raid Boss Battles & Contests**\n` +
+          `• **/boss**: Check countdowns for the next official LeetCode Weekly and Biweekly contests.\n` +
+          `• During contests, the bot launches an automated server-wide **Mega Boss Raid**.\n` +
+          `• Every problem you solve deals damage to the boss. Slay the boss together to earn server-wide loot!\n\n` +
+          `⚔️ **4. Duels & Squads**\n` +
+          `• **/challenge create**: Challenge your server peers to 1v1, 2v2, or 3v3 solve matches.\n` +
+          `• **/team create \`<name>\` \`<tag>\`**: Create a permanent squad (e.g. \`[DEV] CodeCrushers\`).\n` +
+          `• **/team stats \`<tag>\`**: Track squad rosters and collective power.\n\n` +
+          `🏆 **5. Leaderboards & Analytics**\n` +
+          `• **/leaderboard weekly**: Weekly XP leaderboard — resets Sunday midnight UTC.\n` +
+          `• **/leaderboard streak**: Highest current consecutive days.\n` +
+          `• **/leaderboard consistency**: Reliability score tracking.\n` +
+          `• **/leaderboard contests**: Boss battle damage dealers.\n` +
+          `• **/recap daily**: See who solved problems today and what questions they tackled.\n` +
+          `• **/recap wrapped**: Generate your monthly summary graphic.\n\n` +
+          `🔔 **Role Mentions**: Every time someone solves a question or a daily recap is posted, the **@DEV** role is notified in the alert channel!`,
+      )
+      .setFooter({ text: 'DevGuild • Consistency Over Intensity • Happy Coding! 💻' })
+      .setTimestamp();
+  }
 }
