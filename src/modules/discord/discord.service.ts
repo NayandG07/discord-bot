@@ -28,6 +28,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DiscordService.name);
   private readonly httpCommandTimeoutMs = 120_000;
   private readonly externalOperationTimeoutMs = 30_000;
+  private readonly httpFollowUpTimeoutMs = 10_000;
   private client: Client;
 
   constructor(
@@ -124,7 +125,11 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     const editReply = async (payload: any) => {
       this.logger.log(`Sending HTTP interaction follow-up for /${body.data?.name ?? 'unknown'}.`);
       try {
-        await rest.patch(Routes.webhookMessage(clientId, body.token), normalizePayload(payload));
+        await this.withTimeout(
+          rest.patch(Routes.webhookMessage(clientId, body.token), normalizePayload(payload)),
+          this.httpFollowUpTimeoutMs,
+          `Discord /${body.data?.name ?? 'unknown'} follow-up`,
+        );
         this.logger.log(`HTTP interaction follow-up sent for /${body.data?.name ?? 'unknown'}.`);
       } catch (err: any) {
         this.logger.error(`Failed to send HTTP interaction follow-up for /${body.data?.name ?? 'unknown'}: ${err.message}`, err.stack);

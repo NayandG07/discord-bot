@@ -83,4 +83,18 @@ describe('DiscordService HTTP command responses', () => {
     expect(patch).toHaveBeenCalledTimes(1);
     expect(patch.mock.calls[0][1].body.content).toContain('Failed to sync');
   });
+
+  it('does not hang when Discord does not complete the follow-up request', async () => {
+    patch.mockImplementation(() => new Promise(() => undefined));
+    (service as any).httpFollowUpTimeoutMs = 10;
+
+    await service.handleHttpSlashCommand({
+      token: 'interaction-token',
+      guild_id: 'guild-id',
+      member: { user: { id: 'discord-id', username: 'discord-user' } },
+      data: { name: 'recap', options: [] },
+    });
+
+    expect(patch).toHaveBeenCalled();
+  });
 });
