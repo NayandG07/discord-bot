@@ -5,10 +5,15 @@ import { PrismaClient } from '@prisma/client';
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
 
-  async onModuleInit() {
+  onModuleInit() {
     this.logger.log('Connecting to PostgreSQL via Prisma Client...');
-    await this.$connect();
-    this.logger.log('PostgreSQL connection established successfully.');
+    this.$connect()
+      .then(() => {
+        this.logger.log('PostgreSQL connection established successfully.');
+      })
+      .catch((err) => {
+        this.logger.error(`PostgreSQL connection error: ${err.message}`);
+      });
   }
 
   async onModuleDestroy() {

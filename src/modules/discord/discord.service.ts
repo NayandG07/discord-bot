@@ -45,16 +45,28 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async onModuleInit() {
-    const token = this.config.get<string>('DISCORD_BOT_TOKEN');
+  onModuleInit() {
+    const rawToken = this.config.get<string>('DISCORD_BOT_TOKEN');
+    const token = rawToken?.trim();
     if (!token) {
       this.logger.warn('DISCORD_BOT_TOKEN not provided. Discord Bot Client will not start.');
       return;
     }
 
     this.registerEventHandlers();
-    await this.client.login(token);
-    await this.registerSlashCommands();
+    this.initDiscord(token).catch((err) => {
+      this.logger.error(`Discord initialization error: ${err.message}`, err.stack);
+    });
+  }
+
+  private async initDiscord(token: string) {
+    try {
+      this.logger.log('Connecting DevGuild to Discord Gateway...');
+      await this.client.login(token);
+      await this.registerSlashCommands();
+    } catch (err: any) {
+      this.logger.error(`Failed to initialize Discord client: ${err.message}`, err.stack);
+    }
   }
 
   async onModuleDestroy() {
@@ -69,8 +81,10 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async registerSlashCommands() {
-    const token = this.config.get<string>('DISCORD_BOT_TOKEN');
-    const clientId = this.config.get<string>('DISCORD_CLIENT_ID');
+    const rawToken = this.config.get<string>('DISCORD_BOT_TOKEN');
+    const rawClientId = this.config.get<string>('DISCORD_CLIENT_ID');
+    const token = rawToken?.trim();
+    const clientId = rawClientId?.trim();
     if (!token || !clientId) return;
 
     const rest = new REST({ version: '10' }).setToken(token);
