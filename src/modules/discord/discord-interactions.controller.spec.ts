@@ -97,4 +97,36 @@ describe('DiscordInteractionsController', () => {
     expect(res.status).toHaveBeenCalledWith(401);
     expect(res.json).toHaveBeenCalledWith({ error: 'Invalid request signature' });
   });
+
+  it('sends an immediate deferred response without waiting for slash-command work', async () => {
+    discordService.handleHttpSlashCommand.mockReturnValue(new Promise(() => undefined));
+    const { req } = signedRequest('{"type":2,"token":"interaction-token","data":{"name":"sync"}}');
+    const res = response();
+
+    await controller.handleInteraction(req, res, undefined, undefined);
+
+    expect(res.json).toHaveBeenCalledWith({ type: 5, data: { flags: 64 } });
+    expect(discordService.handleHttpSlashCommand).toHaveBeenCalledWith(req.body);
+  });
+
+  it('sends an immediate deferred component response without waiting for button work', async () => {
+    discordService.handleHttpComponentInteraction.mockReturnValue(new Promise(() => undefined));
+    const { req } = signedRequest('{"type":3,"token":"interaction-token","data":{"custom_id":"verify"}}');
+    const res = response();
+
+    await controller.handleInteraction(req, res, undefined, undefined);
+
+    expect(res.json).toHaveBeenCalledWith({ type: 6 });
+    expect(discordService.handleHttpComponentInteraction).toHaveBeenCalledWith(req.body);
+  });
+
+  it('does not leave an unhandled rejection when post-defer slash work fails', async () => {
+    discordService.handleHttpSlashCommand.mockRejectedValue(new Error('command failed'));
+    const { req } = signedRequest('{"type":2,"token":"interaction-token","data":{"name":"sync"}}');
+    const res = response();
+
+    await expect(controller.handleInteraction(req, res, undefined, undefined)).resolves.toBeUndefined();
+    await Promise.resolve();
+    expect(res.json).toHaveBeenCalledWith({ type: 5, data: { flags: 64 } });
+  });
 });
