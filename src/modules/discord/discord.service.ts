@@ -59,7 +59,15 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     try {
       this.logger.log(`TOKEN_DEBUG: length=${token.length}, prefix="${token.substring(0, 12)}", suffix="${token.substring(token.length - 6)}"`);
       this.logger.log(`Connecting DevGuild to Discord Gateway (token prefix: ${token.substring(0, 8)}...)...`);
-      await this.client.login(token);
+
+      // Race login against a 30s timeout to detect silent WebSocket hangs (common on Render free tier)
+      await Promise.race([
+        this.client.login(token),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Discord Gateway login timed out after 30 seconds. WebSocket to wss://gateway.discord.gg may be blocked on this host.')), 30_000),
+        ),
+      ]);
+
       this.logger.log(`Discord login successful. Tag: ${this.client.user?.tag}`);
       await this.registerSlashCommands();
     } catch (err: any) {
