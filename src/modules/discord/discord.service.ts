@@ -37,17 +37,13 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     private readonly activity: ActivityService,
   ) {
     this.client = new Client({
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.GuildMembers,
-      ],
+      intents: [GatewayIntentBits.Guilds],
     });
   }
 
   onModuleInit() {
     const rawToken = this.config.get<string>('DISCORD_BOT_TOKEN');
-    const token = rawToken?.trim();
+    const token = rawToken?.trim().replace(/^["']|["']$/g, '');
     if (!token) {
       this.logger.warn('DISCORD_BOT_TOKEN not provided. Discord Bot Client will not start.');
       return;
@@ -61,8 +57,9 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
 
   private async initDiscord(token: string) {
     try {
-      this.logger.log('Connecting DevGuild to Discord Gateway...');
+      this.logger.log(`Connecting DevGuild to Discord Gateway (token prefix: ${token.substring(0, 8)}...)...`);
       await this.client.login(token);
+      this.logger.log(`Discord login successful. Tag: ${this.client.user?.tag}`);
       await this.registerSlashCommands();
     } catch (err: any) {
       this.logger.error(`Failed to initialize Discord client: ${err.message}`, err.stack);
@@ -83,9 +80,12 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   private async registerSlashCommands() {
     const rawToken = this.config.get<string>('DISCORD_BOT_TOKEN');
     const rawClientId = this.config.get<string>('DISCORD_CLIENT_ID');
-    const token = rawToken?.trim();
-    const clientId = rawClientId?.trim();
-    if (!token || !clientId) return;
+    const token = rawToken?.trim().replace(/^["']|["']$/g, '');
+    const clientId = rawClientId?.trim().replace(/^["']|["']$/g, '');
+    if (!token || !clientId) {
+      this.logger.warn('DISCORD_BOT_TOKEN or DISCORD_CLIENT_ID missing; skipping slash commands registration.');
+      return;
+    }
 
     const rest = new REST({ version: '10' }).setToken(token);
     try {
@@ -100,19 +100,33 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   }
 
   private registerEventHandlers() {
+    this.client.on('ready', () => {
+      this.logger.log(`DevGuild Discord Bot ready as ${this.client.user?.tag}!`);
+    });
+
     this.client.on('clientReady', () => {
-      this.logger.log(`DevGuild Discord Bot logged in as ${this.client.user?.tag}!`);
+      this.logger.log(`DevGuild Discord Bot clientReady: ${this.client.user?.tag}`);
     });
 
     this.client.on('error', (err) => {
-      this.logger.error(`Discord client error encountered: ${err.message}`, err.stack);
+      this.logger.error(`Discord client error: ${err.message}`, err.stack);
+    });
+
+    this.client.on('shardError', (err) => {
+      this.logger.error(`Discord WebSocket shard error: ${err.message}`, err.stack);
+    });
+
+    this.client.on('shardDisconnect', (event) => {
+      this.logger.warn(`Discord shard disconnected (code ${event.code}): ${event.reason}`);
     });
 
     this.client.on('interactionCreate', async (interaction) => {
       try {
         if (interaction.isChatInputCommand()) {
+          this.logger.log(`Received command /${interaction.commandName} from ${interaction.user.username}`);
           await this.handleSlashCommand(interaction);
         } else if (interaction.isButton()) {
+          this.logger.log(`Received button interaction ${interaction.customId} from ${interaction.user.username}`);
           await this.handleButtonInteraction(interaction);
         }
       } catch (err: any) {
@@ -261,9 +275,13 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
           .setStyle(ButtonStyle.Success),
       );
 
-      await interaction.editReply({ embeds: [embed], components: [row] });
     } else if (commandName === 'sync') {
-      await interaction.deferReply({ flags: 64 });
+      try {
+        await interaction.deferReply({ flags: 64 });
+      } catch (deferErr: any) {
+        this.logger.warn(`Could not defer reply for /sync: ${deferErr.message}`);
+        return;
+      }
       const user = await this.prisma.user.findUnique({
         where: { discordId: interaction.user.id },
         include: { leetCodeProfile: true },
