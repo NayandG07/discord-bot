@@ -80,6 +80,14 @@ async function bootstrap() {
       createLeetCodeSyncWorker(prisma, leetcode, activity, connection, discord);
 
       const syncQueue = new Queue('leetcode-sync-queue', { connection });
+
+      // Remove ALL stale repeatable jobs before re-registering to prevent duplicates on restart
+      const existingRepeatableJobs = await syncQueue.getRepeatableJobs();
+      for (const job of existingRepeatableJobs) {
+        await syncQueue.removeRepeatableByKey(job.key);
+        logger.log(`Removed stale repeatable job: ${job.name} (key: ${job.key})`);
+      }
+
       await syncQueue.add(
         'poll-all-active-users',
         {},
