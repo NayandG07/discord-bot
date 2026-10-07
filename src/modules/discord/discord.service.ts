@@ -1285,16 +1285,12 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Returns a configured webhook URL for an alert channel.
+   * Read securely from DISCORD_ALERT_WEBHOOK_URL environment variable.
    * Enables complete bypass of Cloudflare Error 1015 IP rate limits on Render.
    */
   getWebhookUrlForChannel(channelId: string): string | null {
     const envWebhook = this.config.get<string>('DISCORD_ALERT_WEBHOOK_URL')?.trim();
     if (envWebhook) return envWebhook;
-
-    // Primary alert channel for OnlyPlans guild
-    if (channelId === '1557083415063560202') {
-      return 'https://discord.com/api/webhooks/1557411392020156436/Bl_1NuZN4A8Pjy2o832UrsF3MczdWJZ48iMDrMsqfd3UA4iiXY5rwjzt3gqKbNUVTHVr';
-    }
     return null;
   }
 
