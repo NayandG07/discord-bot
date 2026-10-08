@@ -1689,27 +1689,35 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     channelId: string,
     payload: { content?: string; embeds?: any[]; allowed_mentions?: any },
   ): Promise<boolean> {
-    // 1. Try discord.js Gateway client if ready
+    // 1. FIRST try webhook proxy (webhook.lewisakura.moe bypasses Cloudflare 1015 on Render IPs).
+    //    This is intentionally tried BEFORE the Gateway client because client.channels.send()
+    //    internally makes discord.com REST calls that ALSO get blocked by Cloudflare 1015
+    //    from Render's shared IP ranges, causing it to silently succeed but never actually deliver.
+    const webhookUrl = await this.getWebhookUrlForChannel(channelId);
+    if (webhookUrl) {
+      const webhookSuccess = await this.sendWebhookMessage(webhookUrl, payload);
+      if (webhookSuccess) {
+        this.logger.log(`Message delivered to channel ${channelId} via webhook proxy.`);
+        return true;
+      }
+      this.logger.warn(`Webhook proxy delivery failed for channel ${channelId}.`);
+    }
+
+    // 2. Try discord.js Gateway client (WebSocket-based, may work even if REST is blocked)
     if (this.client?.isReady?.()) {
       try {
         const channel = await this.client.channels.fetch(channelId).catch(() => null);
         if (channel && channel.isTextBased()) {
           await (channel as any).send(payload);
+          this.logger.log(`Message delivered to channel ${channelId} via Gateway client.`);
           return true;
         }
       } catch (err: any) {
-        this.logger.warn(`client.channels.send failed for ${channelId}: ${err.message}. Trying webhook / direct HTTP...`);
+        this.logger.warn(`client.channels.send failed for ${channelId}: ${err.message}.`);
       }
     }
 
-    // 2. Try Discord Webhook (bypasses Cloudflare Error 1015 on Render)
-    const webhookUrl = await this.getWebhookUrlForChannel(channelId);
-    if (webhookUrl) {
-      const webhookSuccess = await this.sendWebhookMessage(webhookUrl, payload);
-      if (webhookSuccess) return true;
-    }
-
-    // 3. Fallback to direct REST API
+    // 3. Last resort: direct discord.com REST API
     const token = this.config.get<string>('DISCORD_BOT_TOKEN')?.trim().replace(/^["']|["']$/g, '') ?? '';
     const jsonBody = {
       content: payload.content,
@@ -1719,6 +1727,9 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     const jsonStr = JSON.stringify(jsonBody);
 
     const restSuccess = await this.executeHttpsPost('discord.com', `/api/v10/channels/${channelId}/messages`, jsonStr, `Bot ${token}`);
+    if (!restSuccess) {
+      this.logger.error(`All delivery strategies exhausted for channel ${channelId}. Message was NOT sent.`);
+    }
     return restSuccess;
   }
 }
