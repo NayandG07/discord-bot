@@ -362,6 +362,7 @@ export class DiscordEmbeds {
           `• 👑 **Mythic Architect**: 35,000+ XP *(Reliability ≥ 90% + 5 Contests + 5 Duel Wins)*\n\n` +
           `⭐ **3. Problem Solve XP Economy**\n` +
           `• 🟩 **Easy**: **25 XP**  |  🟨 **Medium**: **60 XP**  |  🟥 **Hard**: **150 XP**\n` +
+          `• **Guild Solves vs. LC Lifetime**: Guild XP and Bot Solves track problems solved *since joining DevGuild*. Historical solves from before joining are preserved under \`🧩 LC Total\`.\n` +
           `• **Relaxed Anti-Farming**: Solve alongside course lectures without penalty!\n` +
           `  - Solves 1–10 (Easy): **100% full XP**\n` +
           `  - Solves 11–20 (Easy): **80% XP**\n` +
@@ -392,6 +393,10 @@ export class DiscordEmbeds {
           `• ⚠️ **Accountability Clause**: Completing goals awards **NO bonuses** (discipline is its own reward). If you fail to hit your target before deadline, you are **PENALIZED**:\n` +
           `  - Daily failure: **-50 XP** and **-5.0% Reliability**\n` +
           `  - Weekly failure: **-150 XP** and **-10.0% Reliability**\n\n` +
+          `📊 **8. Community Recaps & Digest**\n` +
+          `• **/recap daily**: 24-hour guild solve recap and active coder list.\n` +
+          `• **/recap weekly**: Past 7-day solve digest, top solvers, and difficulty breakdown.\n` +
+          `• **/recap wrapped**: Generate your personal Monthly Wrapped graphic card!\n\n` +
           `• 🔔 The **@DEV** role is tagged automatically on solves and digest recaps!`,
       )
       .setFooter({ text: 'DevGuild • Consistency Over Intensity • Happy Coding! 💻' })

@@ -471,45 +471,71 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Skipping direct webhook delivery: invalid snowflake appId "${appId}"`);
       return Promise.resolve();
     }
+    const path = messageId === '@original'
+      ? `/api/v10/webhooks/${appId}/${interactionToken}/messages/@original`
+      : `/api/v10/webhooks/${appId}/${interactionToken}`;
+
+    const proxyHost = this.config.get<string>('DISCORD_WEBHOOK_PROXY_HOST')?.trim() || 'webhook.lewisakura.moe';
+
+    const sendToHost = (hostname: string): Promise<boolean> => {
+      return new Promise(async (resolve) => {
+        try {
+          const https = await import('https');
+          const jsonStr = JSON.stringify(body);
+          const req = https.request(
+            {
+              hostname,
+              port: 443,
+              path,
+              method,
+              headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(jsonStr),
+                'User-Agent': 'DiscordBot (https://discord.js.org, 14.16.3)',
+                'Accept': 'application/json',
+              },
+              family: 4, // Force IPv4
+              timeout: 8000,
+            },
+            (res: any) => {
+              let responseData = '';
+              res.on('data', (chunk: any) => (responseData += chunk));
+              res.on('end', () => {
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                  resolve(true);
+                } else {
+                  this.logger.warn(`Direct webhook to ${hostname}${path} returned ${res.statusCode}: ${responseData}`);
+                  resolve(false);
+                }
+              });
+            },
+          );
+          req.on('timeout', () => {
+            req.destroy();
+            resolve(false);
+          });
+          req.on('error', (err: any) => {
+            this.logger.warn(`Direct webhook to ${hostname}${path} error: ${err.message}`);
+            resolve(false);
+          });
+          req.write(jsonStr);
+          req.end();
+        } catch {
+          resolve(false);
+        }
+      });
+    };
+
     return new Promise(async (resolve, reject) => {
-      const https = await import('https');
-      const jsonStr = JSON.stringify(body);
-      const path = messageId === '@original'
-        ? `/api/v10/webhooks/${appId}/${interactionToken}/messages/@original`
-        : `/api/v10/webhooks/${appId}/${interactionToken}`;
+      // 1. Try proxy host first (bypasses Cloudflare 1015 on Render)
+      const proxySuccess = await sendToHost(proxyHost);
+      if (proxySuccess) return resolve();
 
-      const req = https.request({
-        hostname: 'discord.com',
-        port: 443,
-        path,
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(jsonStr),
-          'User-Agent': 'DiscordBot (https://discord.js.org, 14.16.3)',
-          'Accept': 'application/json',
-        },
-        family: 4, // Force IPv4 to prevent IPv6 SYN hang on cloud containers
-        timeout: 8000,
-      }, (res: any) => {
-        let responseData = '';
-        res.on('data', (chunk: any) => responseData += chunk);
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            resolve();
-          } else {
-            reject(new Error(`Discord API returned ${res.statusCode}: ${responseData}`));
-          }
-        });
-      });
+      // 2. Fallback to direct discord.com
+      const directSuccess = await sendToHost('discord.com');
+      if (directSuccess) return resolve();
 
-      req.on('timeout', () => {
-        req.destroy(new Error('Direct Discord HTTPS request timed out after 8000ms'));
-      });
-
-      req.on('error', reject);
-      req.write(jsonStr);
-      req.end();
+      reject(new Error(`Failed to deliver interaction webhook to both ${proxyHost} and discord.com`));
     });
   }
 
@@ -756,6 +782,12 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         let newCount = 0;
 
         for (const sub of accepted) {
+          const subTimestamp = new Date(Number(sub.timestamp) * 1000);
+          // Never ingest historical problems solved before the user joined/linked with DevGuild
+          if (subTimestamp < user.createdAt) {
+            continue;
+          }
+
           const details = await this.withTimeout(
             this.leetcode.fetchQuestionDetails(sub.titleSlug),
             this.externalOperationTimeoutMs,

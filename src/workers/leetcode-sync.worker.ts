@@ -40,6 +40,12 @@ export function createLeetCodeSyncWorker(
             const accepted = submissions.filter((s) => s.statusDisplay === 'Accepted');
 
             for (const sub of accepted) {
+              const subTimestamp = new Date(Number(sub.timestamp) * 1000);
+              // Never ingest historical problems solved before the user joined/linked with DevGuild
+              if (subTimestamp < profile.createdAt) {
+                continue;
+              }
+
               const details = await leetcode.fetchQuestionDetails(sub.titleSlug);
               if (!details) continue;
 

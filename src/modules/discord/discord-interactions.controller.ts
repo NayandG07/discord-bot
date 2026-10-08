@@ -77,7 +77,9 @@ export class DiscordInteractionsController {
 
     // Step 3: APPLICATION_COMMAND (slash command)
     if (body.type === 2) {
-      if (typeof this.discordService.executeHttpSlashCommand === 'function') {
+      const cmdName = body.data?.name;
+      // Ultra-fast commands like /guide can respond synchronously if executed within 2.5s
+      if (cmdName === 'guide' && typeof this.discordService.executeHttpSlashCommand === 'function') {
         try {
           const directResponse = await Promise.race([
             this.discordService.executeHttpSlashCommand(body),
@@ -85,7 +87,7 @@ export class DiscordInteractionsController {
           ]);
 
           if (directResponse) {
-            this.logger.log(`Responding synchronously to slash command /${body.data?.name ?? 'unknown'}.`);
+            this.logger.log(`Responding synchronously to slash command /${cmdName}.`);
             return res.json({ type: 4, data: directResponse });
           }
         } catch (err: any) {
