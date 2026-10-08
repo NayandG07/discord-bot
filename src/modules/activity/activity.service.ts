@@ -151,6 +151,7 @@ export class ActivityService {
           diminishingRate: xpCalc.diminishingRate,
           finalAmount: xpCalc.finalAmount,
           reason: xpCalc.reason,
+          createdAt: dto.submissionTimestamp,
         },
       });
 

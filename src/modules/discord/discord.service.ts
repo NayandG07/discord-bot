@@ -517,16 +517,15 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       });
       this.logger.log('Successfully registered all global slash commands.');
 
-      // Register immediately to all known guilds for instant propagation without cache delay
+      // Clear any guild-scoped commands so Discord client does not display duplicate command entries
       const guilds = await this.prisma.guild.findMany();
       for (const g of guilds) {
         try {
           await rest.put(Routes.applicationGuildCommands(clientId, g.discordGuildId), {
-            body: commandBody,
+            body: [],
           });
-          this.logger.log(`Successfully registered slash commands for guild ${g.discordGuildId}`);
         } catch (gErr: any) {
-          this.logger.warn(`Failed to register slash commands for guild ${g.discordGuildId}: ${gErr.message}`);
+          // ignore
         }
       }
     } catch (err: any) {
@@ -842,7 +841,11 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
 
       let user = await this.prisma.user.findUnique({
         where: { discordId: targetUser.id },
-        include: { leetCodeProfile: true, guildMemberships: { include: { guild: true } } },
+        include: {
+          leetCodeProfile: true,
+          guildMemberships: { include: { guild: true } },
+          _count: { select: { activities: true } },
+        },
       });
 
       if (!user || !user.leetCodeProfile || !user.leetCodeProfile.isVerified) {
@@ -905,8 +908,9 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         ) || user.guildMemberships[0];
       const rankTier = guildMember?.guildRank || 'BRONZE';
       const guildXp = guildMember?.guildXp ? Number(guildMember.guildXp) : 0;
+      const botSolves = user._count?.activities || 0;
 
-      const embed = DiscordEmbeds.createProfileEmbed(user, user.leetCodeProfile, rankTier as any, guildXp);
+      const embed = DiscordEmbeds.createProfileEmbed(user, user.leetCodeProfile, rankTier as any, guildXp, botSolves);
       await interaction.editReply({ embeds: [embed] });
     } else if (commandName === 'recap') {
       const sub = interaction.options.getSubcommand();
@@ -921,6 +925,20 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         const { mention, roleId } = await this.getDevRoleMention(interaction.guildId);
         await interaction.editReply({
           content: `📢 **Daily Guild Digest!** ${mention}`,
+          embeds: [embed],
+          allowed_mentions: roleId ? { roles: [roleId] } : { parse: ['roles'] },
+        } as any);
+      } else if (sub === 'weekly' && interaction.guildId) {
+        await interaction.deferReply();
+        const summary = await this.withTimeout(
+          this.recap.generateWeeklyGuildRecap(interaction.guildId),
+          this.externalOperationTimeoutMs,
+          'Weekly recap generation',
+        );
+        const embed = DiscordEmbeds.createWeeklyRecapEmbed(summary);
+        const { mention, roleId } = await this.getDevRoleMention(interaction.guildId);
+        await interaction.editReply({
+          content: `📢 **Weekly Guild Digest!** ${mention}`,
           embeds: [embed],
           allowed_mentions: roleId ? { roles: [roleId] } : { parse: ['roles'] },
         } as any);

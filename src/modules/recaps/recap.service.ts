@@ -96,6 +96,94 @@ export class RecapService {
     return summary;
   }
 
+  async generateWeeklyGuildRecap(guildIdOrDiscordId: string) {
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const guild = await this.prisma.guild.findFirst({
+      where: {
+        OR: [
+          { id: guildIdOrDiscordId.length === 36 ? guildIdOrDiscordId : undefined },
+          { discordGuildId: guildIdOrDiscordId },
+        ],
+      },
+    });
+
+    if (!guild) {
+      return {
+        totalSolves: 0,
+        activeSolversCount: 0,
+        difficultyDistribution: { easy: 0, medium: 0, hard: 0 },
+        totalXpEarned: 0,
+        solvers: [],
+        timestamp: new Date(),
+      };
+    }
+
+    const guildId = guild.id;
+
+    const activities = await this.prisma.activity.findMany({
+      where: {
+        submissionTimestamp: { gte: oneWeekAgo },
+        user: { guildMemberships: { some: { guildId } } },
+      },
+      include: { user: true },
+    });
+
+    let easy = 0, medium = 0, hard = 0;
+    const solversMap = new Map<string, {
+      userId: string;
+      username: string;
+      discordId: string;
+      solvesCount: number;
+      problems: string[];
+      easy: number;
+      medium: number;
+      hard: number;
+    }>();
+
+    activities.forEach((a) => {
+      if (a.difficulty === ProblemDifficulty.EASY) easy++;
+      if (a.difficulty === ProblemDifficulty.MEDIUM) medium++;
+      if (a.difficulty === ProblemDifficulty.HARD) hard++;
+
+      const existing = solversMap.get(a.userId) || {
+        userId: a.userId,
+        username: a.user.username,
+        discordId: a.user.discordId,
+        solvesCount: 0,
+        problems: [],
+        easy: 0,
+        medium: 0,
+        hard: 0,
+      };
+      existing.solvesCount++;
+      if (!existing.problems.includes(a.problemTitle)) {
+        existing.problems.push(a.problemTitle);
+      }
+      if (a.difficulty === ProblemDifficulty.EASY) existing.easy++;
+      if (a.difficulty === ProblemDifficulty.MEDIUM) existing.medium++;
+      if (a.difficulty === ProblemDifficulty.HARD) existing.hard++;
+      solversMap.set(a.userId, existing);
+    });
+
+    const xpSum = await this.prisma.xPTransactions.aggregate({
+      where: {
+        guildId,
+        createdAt: { gte: oneWeekAgo },
+      },
+      _sum: { finalAmount: true },
+    });
+
+    return {
+      totalSolves: activities.length,
+      activeSolversCount: solversMap.size,
+      difficultyDistribution: { easy, medium, hard },
+      totalXpEarned: xpSum._sum.finalAmount || 0,
+      solvers: Array.from(solversMap.values()).sort((a, b) => b.solvesCount - a.solvesCount),
+      timestamp: new Date(),
+    };
+  }
+
   async generateMonthlyWrappedCard(userId: string, year: number, month: number): Promise<Buffer> {
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0, 23, 59, 59);

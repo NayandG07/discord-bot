@@ -12,6 +12,7 @@ export class LeaderboardService {
         user: {
           include: {
             leetCodeProfile: true,
+            _count: { select: { activities: true } },
           },
         },
       },
@@ -29,11 +30,13 @@ export class LeaderboardService {
         metricLabel: 'Guild XP',
         metricValue: Number(m.guildXp),
         tier: m.guildRank,
+        botSolved: m.user._count?.activities ?? 0,
         totalSolved: profile?.totalSolved ?? 0,
         easy: profile?.easySolved ?? 0,
         medium: profile?.mediumSolved ?? 0,
         hard: profile?.hardSolved ?? 0,
         streak: m.user.currentStreak,
+        longestStreak: m.user.longestStreak,
         contestRating: profile?.contestRating ? Number(profile.contestRating) : undefined,
       };
     });
@@ -66,6 +69,13 @@ export class LeaderboardService {
         });
         const member = user?.guildMemberships?.[0];
         const profile = user?.leetCodeProfile;
+        const weeklySolvesCount = await this.prisma.activity.count({
+          where: {
+            userId: row.userId,
+            submissionTimestamp: { gte: oneWeekAgo },
+          },
+        });
+
         return {
           rank: index + 1,
           userId: row.userId,
@@ -74,11 +84,13 @@ export class LeaderboardService {
           metricLabel: 'Weekly XP',
           metricValue: row._sum.finalAmount || 0,
           tier: member?.guildRank,
+          botSolved: weeklySolvesCount,
           totalSolved: profile?.totalSolved,
           easy: profile?.easySolved,
           medium: profile?.mediumSolved,
           hard: profile?.hardSolved,
           streak: user?.currentStreak,
+          longestStreak: user?.longestStreak,
           contestRating: profile?.contestRating ? Number(profile.contestRating) : undefined,
         };
       }),
@@ -94,6 +106,7 @@ export class LeaderboardService {
         user: {
           include: {
             leetCodeProfile: true,
+            _count: { select: { activities: true } },
           },
         },
       },
@@ -111,11 +124,13 @@ export class LeaderboardService {
         metricLabel: 'Day Streak',
         metricValue: m.user.currentStreak,
         tier: m.guildRank,
+        botSolved: m.user._count?.activities ?? 0,
         totalSolved: profile?.totalSolved,
         easy: profile?.easySolved,
         medium: profile?.mediumSolved,
         hard: profile?.hardSolved,
         streak: m.user.currentStreak,
+        longestStreak: m.user.longestStreak,
         contestRating: profile?.contestRating ? Number(profile.contestRating) : undefined,
       };
     });
@@ -128,6 +143,7 @@ export class LeaderboardService {
         user: {
           include: {
             leetCodeProfile: true,
+            _count: { select: { activities: true } },
           },
         },
       },
@@ -145,11 +161,13 @@ export class LeaderboardService {
         metricLabel: 'Reliability %',
         metricValue: Number(m.user.reliabilityScore),
         tier: m.guildRank,
+        botSolved: m.user._count?.activities ?? 0,
         totalSolved: profile?.totalSolved,
         easy: profile?.easySolved,
         medium: profile?.mediumSolved,
         hard: profile?.hardSolved,
         streak: m.user.currentStreak,
+        longestStreak: m.user.longestStreak,
         contestRating: profile?.contestRating ? Number(profile.contestRating) : undefined,
       };
     });

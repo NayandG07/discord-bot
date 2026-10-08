@@ -122,6 +122,7 @@ export const SLASH_COMMANDS = [
     .setName('recap')
     .setDescription('View daily or weekly recap')
     .addSubcommand((sub) => sub.setName('daily').setDescription('View today’s solve recap'))
+    .addSubcommand((sub) => sub.setName('weekly').setDescription('View past 7-day solve digest and leaderboard recap'))
     .addSubcommand((sub) => sub.setName('wrapped').setDescription('Generate your Monthly Wrapped card')),
 
   new SlashCommandBuilder()

@@ -37,7 +37,7 @@ export class DiscordEmbeds {
       .setTimestamp();
   }
 
-  static createProfileEmbed(user: any, profile: any, rankTier: RankTier, guildXp = 0): EmbedBuilder {
+  static createProfileEmbed(user: any, profile: any, rankTier: RankTier, guildXp = 0, botSolves = 0): EmbedBuilder {
     const color = RANK_COLORS[rankTier] || 0xcd7f32;
     const rankTitle = RANK_NAMES[rankTier] || rankTier;
 
@@ -63,12 +63,12 @@ export class DiscordEmbeds {
         },
         {
           name: 'Streak Stats',
-          value: `🔥 Current: **${user.currentStreak} Days**\n⚡ Max Streak: **${user.longestStreak} Days**`,
+          value: `🔥 Bot Streak: **${user.currentStreak} Days**\n⚡ LC Max Streak: **${user.longestStreak} Days**`,
           inline: true,
         },
         {
-          name: 'LeetCode Breakdown',
-          value: `🟩 Easy: **${profile.easySolved}**\n🟨 Medium: **${profile.mediumSolved}**\n🟥 Hard: **${profile.hardSolved}**\n⭐ Total: **${profile.totalSolved}**`,
+          name: 'Solves Tracking',
+          value: `🤖 DevGuild Solves: **${botSolves}**\n🧩 LC Lifetime: **${profile.totalSolved}**\n*(🟩 ${profile.easySolved} · 🟨 ${profile.mediumSolved} · 🟥 ${profile.hardSolved})*`,
           inline: true,
         },
         {
@@ -181,6 +181,41 @@ export class DiscordEmbeds {
     return embed;
   }
 
+  static createWeeklyRecapEmbed(summary: any): EmbedBuilder {
+    const embed = new EmbedBuilder()
+      .setTitle('📊 DEVGUILD WEEKLY RECAP (PAST 7 DAYS)')
+      .setColor(0x00e5ff)
+      .setDescription(
+        `Here is the 7-day guild LeetCode digest!\n\n` +
+          `• Total Problems Solved: **${summary.totalSolves}**\n` +
+          `• Active Coders This Week: **${summary.activeSolversCount}**\n` +
+          `• Total Guild XP Earned: **+${(summary.totalXpEarned || 0).toLocaleString()} XP**\n\n` +
+          `**Difficulty Distribution**:\n` +
+          `🟩 Easy: **${summary.difficultyDistribution?.easy ?? 0}**  |  🟨 Medium: **${summary.difficultyDistribution?.medium ?? 0}**  |  🟥 Hard: **${summary.difficultyDistribution?.hard ?? 0}**`,
+      )
+      .setFooter({ text: 'DevGuild Weekly Digest • Consistency over intensity' })
+      .setTimestamp();
+
+    if (summary.solvers && summary.solvers.length > 0) {
+      const solversText = summary.solvers
+        .map((s: any, idx: number) => {
+          const medal = idx === 0 ? '👑' : '⭐';
+          const breakdown = `(${s.easy}E / ${s.medium}M / ${s.hard}H)`;
+          const problemSample = s.problems.slice(0, 4).join(', ');
+          const more = s.problems.length > 4 ? ` +${s.problems.length - 4} more` : '';
+          return `${medal} **${s.username}** — **${s.solvesCount} solve${s.solvesCount > 1 ? 's' : ''}** ${breakdown}\n└ *${problemSample}${more}*`;
+        })
+        .join('\n\n');
+
+      embed.addFields({
+        name: '👥 Coders Active This Week',
+        value: solversText.length > 1024 ? solversText.substring(0, 1020) + '...' : solversText,
+      });
+    }
+
+    return embed;
+  }
+
   static createLeaderboardEmbed(title: string, entries: any[]): EmbedBuilder {
     const embed = new EmbedBuilder()
       .setTitle(`🏆 DEVGUILD LEADERBOARD — ${title.toUpperCase()}`)
@@ -202,13 +237,19 @@ export class DiscordEmbeds {
         let line = `${medal} **${entry.username}**${tier} — **${value}** ${entry.metricLabel}`;
 
         const details: string[] = [];
+        if (entry.botSolved !== undefined) {
+          details.push(`🤖 **${entry.botSolved}** Bot Solves`);
+        }
         if (entry.totalSolved !== undefined && entry.totalSolved > 0) {
           const breakdown =
             entry.easy !== undefined ? ` (${entry.easy}E • ${entry.medium}M • ${entry.hard}H)` : '';
-          details.push(`🧩 **${entry.totalSolved}** Solved${breakdown}`);
+          details.push(`🧩 **${entry.totalSolved}** LC Total${breakdown}`);
         }
-        if (entry.streak !== undefined && entry.streak > 0) {
-          details.push(`🔥 **${entry.streak}d** Streak`);
+        if (entry.streak !== undefined) {
+          details.push(`🔥 **${entry.streak}d** Bot Streak`);
+        }
+        if (entry.longestStreak !== undefined && entry.longestStreak > 0) {
+          details.push(`⚡ **${entry.longestStreak}d** LC Max`);
         }
         if (entry.contestRating && entry.contestRating > 0) {
           details.push(`⭐ **${Math.round(Number(entry.contestRating)).toLocaleString()}** Rating`);
