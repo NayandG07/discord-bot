@@ -46,6 +46,16 @@ export function createLeetCodeSyncWorker(
                 continue;
               }
 
+              const existing = await prisma.activity.findUnique({
+                where: {
+                  userId_leetCodeSubmissionId: {
+                    userId: profile.userId,
+                    leetCodeSubmissionId: sub.id,
+                  },
+                },
+              });
+              if (existing) continue;
+
               const details = await leetcode.fetchQuestionDetails(sub.titleSlug);
               if (!details) continue;
 

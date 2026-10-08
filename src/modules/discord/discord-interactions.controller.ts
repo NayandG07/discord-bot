@@ -78,8 +78,8 @@ export class DiscordInteractionsController {
     // Step 3: APPLICATION_COMMAND (slash command)
     if (body.type === 2) {
       const cmdName = body.data?.name;
-      // Ultra-fast commands like /guide can respond synchronously if executed within 2.5s
-      if (cmdName === 'guide' && typeof this.discordService.executeHttpSlashCommand === 'function') {
+      // Respond synchronously (type=4) within 2.5s to completely bypass Cloudflare egress blocks on Render
+      if (typeof this.discordService.executeHttpSlashCommand === 'function') {
         try {
           const directResponse = await Promise.race([
             this.discordService.executeHttpSlashCommand(body),
@@ -91,11 +91,11 @@ export class DiscordInteractionsController {
             return res.json({ type: 4, data: directResponse });
           }
         } catch (err: any) {
-          this.logger.error(`Error processing synchronous slash command: ${err.message}`, err.stack);
+          this.logger.error(`Error processing synchronous slash command /${cmdName}: ${err.message}`, err.stack);
         }
       }
 
-      // Deferred fallback: If command takes longer than 2.5s or in test mode
+      // Deferred fallback: If command takes longer than 2.5s
       res.json({ type: 5, data: { flags: 64 } });
       this.discordService.handleHttpSlashCommand(body).catch((err) => {
         this.logger.error(`Error handling HTTP slash command: ${err.message}`, err.stack);

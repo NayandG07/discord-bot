@@ -475,7 +475,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       ? `/api/v10/webhooks/${appId}/${interactionToken}/messages/@original`
       : `/api/v10/webhooks/${appId}/${interactionToken}`;
 
-    const proxyHost = this.config.get<string>('DISCORD_WEBHOOK_PROXY_HOST')?.trim() || 'webhook.lewisakura.moe';
+    const proxyHost = this.config.get<string>('DISCORD_WEBHOOK_PROXY_HOST')?.trim();
 
     const sendToHost = (hostname: string): Promise<boolean> => {
       return new Promise(async (resolve) => {
@@ -527,15 +527,17 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     };
 
     return new Promise(async (resolve, reject) => {
-      // 1. Try proxy host first (bypasses Cloudflare 1015 on Render)
-      const proxySuccess = await sendToHost(proxyHost);
-      if (proxySuccess) return resolve();
+      // 1. Try proxy host if explicitly configured in environment
+      if (proxyHost) {
+        const proxySuccess = await sendToHost(proxyHost);
+        if (proxySuccess) return resolve();
+      }
 
-      // 2. Fallback to direct discord.com
+      // 2. Direct discord.com
       const directSuccess = await sendToHost('discord.com');
       if (directSuccess) return resolve();
 
-      reject(new Error(`Failed to deliver interaction webhook to both ${proxyHost} and discord.com`));
+      reject(new Error(`Failed to deliver interaction webhook${proxyHost ? ` to both ${proxyHost} and discord.com` : ' to discord.com'}`));
     });
   }
 
@@ -788,6 +790,16 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
             continue;
           }
 
+          const existing = await this.prisma.activity.findUnique({
+            where: {
+              userId_leetCodeSubmissionId: {
+                userId: user.id,
+                leetCodeSubmissionId: sub.id,
+              },
+            },
+          });
+          if (existing) continue;
+
           const details = await this.withTimeout(
             this.leetcode.fetchQuestionDetails(sub.titleSlug),
             this.externalOperationTimeoutMs,
@@ -798,27 +810,16 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
           const diff = details.difficulty.toUpperCase() as ProblemDifficulty;
           const tags = details.topicTags.map((t) => t.name);
 
-          const existing = await this.prisma.activity.findUnique({
-            where: {
-              userId_leetCodeSubmissionId: {
-                userId: user.id,
-                leetCodeSubmissionId: sub.id,
-              },
-            },
+          await this.activity.ingestSubmission({
+            userId: user.id,
+            leetCodeSubmissionId: sub.id,
+            problemTitle: sub.title,
+            problemSlug: sub.titleSlug,
+            difficulty: diff,
+            topicTags: tags,
+            submissionTimestamp: new Date(Number(sub.timestamp) * 1000),
           });
-
-          if (!existing) {
-            await this.activity.ingestSubmission({
-              userId: user.id,
-              leetCodeSubmissionId: sub.id,
-              problemTitle: sub.title,
-              problemSlug: sub.titleSlug,
-              difficulty: diff,
-              topicTags: tags,
-              submissionTimestamp: new Date(Number(sub.timestamp) * 1000),
-            });
-            newCount++;
-          }
+          newCount++;
         }
 
         // Refresh full LeetCode stats & contest metrics
@@ -1306,6 +1307,15 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   @OnEvent('activity.created')
   async handleActivityBroadcast(event: ActivityCreatedEventPayload) {
     try {
+      // 1. Guard against historical submissions: only broadcast solve alerts for problems solved within the last 24 hours
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      if (event.submissionTimestamp && new Date(event.submissionTimestamp).getTime() < oneDayAgo.getTime()) {
+        this.logger.log(
+          `Skipping live activity broadcast for historical submission '${event.problemTitle}' (${new Date(event.submissionTimestamp).toISOString()}).`,
+        );
+        return;
+      }
+
       const user = await this.prisma.user.findUnique({
         where: { id: event.userId },
         include: { guildMemberships: { include: { guild: { include: { notificationConfig: true } } } } },
@@ -1502,17 +1512,17 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       parsedPath = webhookUrl;
     }
 
-    const proxyHost = this.config.get<string>('DISCORD_WEBHOOK_PROXY_HOST')?.trim() || 'webhook.lewisakura.moe';
+    const proxyHost = this.config.get<string>('DISCORD_WEBHOOK_PROXY_HOST')?.trim();
 
-    // 1. Try proxy host first (bypasses Cloudflare 1015 on Render)
-    const proxySuccess = await this.executeHttpsPost(proxyHost, parsedPath, jsonStr);
-    if (proxySuccess) {
-      this.logger.log(`Webhook message delivered via proxy (${proxyHost}).`);
-      return true;
+    if (proxyHost) {
+      const proxySuccess = await this.executeHttpsPost(proxyHost, parsedPath, jsonStr);
+      if (proxySuccess) {
+        this.logger.log(`Webhook message delivered via proxy (${proxyHost}).`);
+        return true;
+      }
+      this.logger.warn(`Proxy delivery failed. Falling back to direct discord.com...`);
     }
 
-    // 2. Fallback to direct discord.com
-    this.logger.warn(`Proxy delivery failed. Falling back to direct discord.com...`);
     return await this.executeHttpsPost('discord.com', parsedPath, jsonStr);
   }
 
