@@ -55,6 +55,11 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    // Always register slash commands right away independently so commands exist even if Gateway WebSocket is rate-limited
+    this.registerSlashCommands().catch((err) => {
+      this.logger.error(`Discord slash command registration error: ${err.message}`);
+    });
+
     this.registerEventHandlers();
     this.initDiscord(token).catch((err) => {
       this.logger.error(`Discord initialization error: ${err.message}`, err.stack);
@@ -505,11 +510,25 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
 
     const rest = new REST({ version: '10' }).setToken(token);
     try {
+      const commandBody = SLASH_COMMANDS.map((cmd) => (typeof cmd.toJSON === 'function' ? cmd.toJSON() : cmd));
       this.logger.log('Registering global Discord slash commands...');
       await rest.put(Routes.applicationCommands(clientId), {
-        body: SLASH_COMMANDS.map((cmd) => cmd.toJSON()),
+        body: commandBody,
       });
       this.logger.log('Successfully registered all global slash commands.');
+
+      // Register immediately to all known guilds for instant propagation without cache delay
+      const guilds = await this.prisma.guild.findMany();
+      for (const g of guilds) {
+        try {
+          await rest.put(Routes.applicationGuildCommands(clientId, g.discordGuildId), {
+            body: commandBody,
+          });
+          this.logger.log(`Successfully registered slash commands for guild ${g.discordGuildId}`);
+        } catch (gErr: any) {
+          this.logger.warn(`Failed to register slash commands for guild ${g.discordGuildId}: ${gErr.message}`);
+        }
+      }
     } catch (err: any) {
       this.logger.error(`Failed to register slash commands: ${err.message}`);
     }
@@ -823,7 +842,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
 
       let user = await this.prisma.user.findUnique({
         where: { discordId: targetUser.id },
-        include: { leetCodeProfile: true, guildMemberships: true },
+        include: { leetCodeProfile: true, guildMemberships: { include: { guild: true } } },
       });
 
       if (!user || !user.leetCodeProfile || !user.leetCodeProfile.isVerified) {
@@ -880,7 +899,10 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      const guildMember = user.guildMemberships.find((m) => m.guildId === interaction.guildId);
+      const guildMember =
+        user.guildMemberships.find(
+          (m) => m.guild?.discordGuildId === interaction.guildId || m.guildId === interaction.guildId,
+        ) || user.guildMemberships[0];
       const rankTier = guildMember?.guildRank || 'BRONZE';
       const guildXp = guildMember?.guildXp ? Number(guildMember.guildXp) : 0;
 
