@@ -36,29 +36,29 @@ describe('ReliabilityService (Rank & Bounds)', () => {
       expect(service.determineRankTier(200, 100, 0, 0)).toBe(RankTier.BRONZE);
     });
 
-    it('should return SILVER for 600 XP', () => {
-      expect(service.determineRankTier(600, 100, 0, 0)).toBe(RankTier.SILVER);
+    it('should return SILVER for 800 XP', () => {
+      expect(service.determineRankTier(800, 100, 0, 0)).toBe(RankTier.SILVER);
     });
 
-    it('should return GOLD for 1500 XP', () => {
-      expect(service.determineRankTier(1500, 100, 0, 0)).toBe(RankTier.GOLD);
+    it('should return GOLD for 3000 XP', () => {
+      expect(service.determineRankTier(3000, 100, 0, 0)).toBe(RankTier.GOLD);
     });
 
-    it('should return PLATINUM for 2800 XP with reliability >= 70', () => {
-      expect(service.determineRankTier(2800, 75, 1, 1)).toBe(RankTier.PLATINUM);
+    it('should return PLATINUM for 7000 XP with reliability >= 70', () => {
+      expect(service.determineRankTier(7000, 75, 1, 1)).toBe(RankTier.PLATINUM);
     });
 
-    it('should demote from DIAMOND to PLATINUM if reliability drops below 80 despite 5000 XP', () => {
-      expect(service.determineRankTier(5000, 75, 2, 2)).toBe(RankTier.PLATINUM);
+    it('should demote from DIAMOND to PLATINUM if reliability drops below 80 despite 13000 XP', () => {
+      expect(service.determineRankTier(13000, 75, 2, 2)).toBe(RankTier.PLATINUM);
     });
 
-    it('should award GRANDMASTER only when XP >= 12000, reliability >= 90, and contests/challenges criteria met', () => {
-      expect(service.determineRankTier(13000, 95, 6, 8)).toBe(RankTier.GRANDMASTER);
+    it('should award GRANDMASTER only when XP >= 35000, reliability >= 90, and contests/challenges criteria met', () => {
+      expect(service.determineRankTier(36000, 95, 6, 8)).toBe(RankTier.GRANDMASTER);
     });
 
-    it('should withhold GRANDMASTER if contest count is less than 5 despite 15000 XP', () => {
+    it('should withhold GRANDMASTER if contest count is less than 5 despite 36000 XP', () => {
       // Falls back to Master
-      expect(service.determineRankTier(15000, 95, 3, 8)).toBe(RankTier.MASTER);
+      expect(service.determineRankTier(36000, 95, 3, 8)).toBe(RankTier.MASTER);
     });
   });
 });

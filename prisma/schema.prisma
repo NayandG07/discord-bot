@@ -259,13 +259,13 @@ model GuildMember {
 model XpConfig {
   id                 String   @id @default(uuid()) @db.Uuid
   guildId            String?  @unique @db.Uuid
-  baseEasyXp         Int      @default(10)
-  baseMediumXp       Int      @default(30)
-  baseHardXp         Int      @default(75)
-  easyTier1Threshold Int      @default(3)
-  easyTier2Threshold Int      @default(6)
-  easyTier3Threshold Int      @default(10)
-  easyFloorPercent   Int      @default(25)
+  baseEasyXp         Int      @default(25)
+  baseMediumXp       Int      @default(60)
+  baseHardXp         Int      @default(150)
+  easyTier1Threshold Int      @default(10)
+  easyTier2Threshold Int      @default(20)
+  easyTier3Threshold Int      @default(30)
+  easyFloorPercent   Int      @default(50)
   streakBonusRate    Decimal  @default(0.020) @db.Decimal(4, 3)
   streakBonusCap     Decimal  @default(0.500) @db.Decimal(4, 3)
   createdAt          DateTime @default(now()) @db.Timestamptz(6)
@@ -284,6 +284,7 @@ model NotificationConfig {
   recapChannelId        String?  @db.VarChar(32)
   bossBattleChannelId   String?  @db.VarChar(32)
   challengeChannelId    String?  @db.VarChar(32)
+  webhookUrl            String?  @db.Text
   enableActivityAlerts  Boolean  @default(true)
   enableDailyRecaps     Boolean  @default(true)
   enableWeeklyRecaps    Boolean  @default(true)

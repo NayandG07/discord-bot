@@ -31,30 +31,31 @@ export class ReliabilityService {
     contestsAttended: number,
     challengesWon: number,
   ): RankTier {
-    // Grandmaster: 12000+ XP, Reliability >= 90, at least 5 contests, 5 challenge wins
-    if (xp >= 12000 && reliabilityScore >= 90 && contestsAttended >= 5 && challengesWon >= 5) {
+    // Grandmaster: Mythic Architect (35,000+ XP, Reliability >= 90, 5 contests, 5 challenge wins)
+    if (xp >= 35000 && reliabilityScore >= 90 && contestsAttended >= 5 && challengesWon >= 5) {
       return RankTier.GRANDMASTER;
     }
-    // Master: 7500+ XP, Reliability >= 85, at least 3 contests
-    if (xp >= 7500 && reliabilityScore >= 85 && contestsAttended >= 3) {
+    // Master: Raid Champion (20,000+ XP, Reliability >= 85, 3 contests)
+    if (xp >= 20000 && reliabilityScore >= 85 && contestsAttended >= 3) {
       return RankTier.MASTER;
     }
-    // Diamond: 4500+ XP, Reliability >= 80
-    if (xp >= 4500 && reliabilityScore >= 80) {
+    // Diamond: Dynamic Conjurer (12,000+ XP, Reliability >= 80)
+    if (xp >= 12000 && reliabilityScore >= 80) {
       return RankTier.DIAMOND;
     }
-    // Platinum: 2500+ XP, Reliability >= 70
-    if (xp >= 2500 && reliabilityScore >= 70) {
+    // Platinum: Recursion Sorcerer (6,000+ XP, Reliability >= 70)
+    if (xp >= 6000 && reliabilityScore >= 70) {
       return RankTier.PLATINUM;
     }
-    // Gold: 1200+ XP
-    if (xp >= 1200) {
+    // Gold: Algorithm Bladesmith (2,500+ XP)
+    if (xp >= 2500) {
       return RankTier.GOLD;
     }
-    // Silver: 500+ XP
-    if (xp >= 500) {
+    // Silver: Logic Sentinel (750+ XP)
+    if (xp >= 750) {
       return RankTier.SILVER;
     }
+    // Bronze: Code Initiate (0 - 749 XP)
     return RankTier.BRONZE;
   }
 

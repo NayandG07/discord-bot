@@ -11,6 +11,16 @@ export const RANK_COLORS: Record<RankTier, number> = {
   [RankTier.GRANDMASTER]: 0xff1744,
 };
 
+export const RANK_NAMES: Record<RankTier, string> = {
+  [RankTier.BRONZE]: '🪵 Code Initiate',
+  [RankTier.SILVER]: '🛡️ Logic Sentinel',
+  [RankTier.GOLD]: '🗡️ Algorithm Bladesmith',
+  [RankTier.PLATINUM]: '🧙‍♂️ Recursion Sorcerer',
+  [RankTier.DIAMOND]: '⚡ Dynamic Conjurer',
+  [RankTier.MASTER]: '🐉 Raid Champion',
+  [RankTier.GRANDMASTER]: '👑 Mythic Architect',
+};
+
 export class DiscordEmbeds {
   static createVerificationPrompt(token: string): EmbedBuilder {
     return new EmbedBuilder()
@@ -29,6 +39,7 @@ export class DiscordEmbeds {
 
   static createProfileEmbed(user: any, profile: any, rankTier: RankTier, guildXp = 0): EmbedBuilder {
     const color = RANK_COLORS[rankTier] || 0xcd7f32;
+    const rankTitle = RANK_NAMES[rankTier] || rankTier;
 
     return new EmbedBuilder()
       .setTitle(`⚔️ DEVGUILD CODER PROFILE — ${user.username}`)
@@ -42,7 +53,7 @@ export class DiscordEmbeds {
         },
         {
           name: 'Guild Rank & XP',
-          value: `Tier: **${rankTier}**\nTotal XP: ⭐ **${guildXp.toLocaleString()} XP**`,
+          value: `Rank: **${rankTitle}**\nTotal XP: ⭐ **${guildXp.toLocaleString()} XP**`,
           inline: true,
         },
         {
@@ -186,7 +197,7 @@ export class DiscordEmbeds {
     const description = entries
       .map((entry, idx) => {
         const medal = rankEmojis[idx] || `\`#${entry.rank}\``;
-        const tier = entry.tier ? ` \`[${entry.tier}]\`` : '';
+        const tier = entry.tier ? ` \`[${(RANK_NAMES as any)[entry.tier] || entry.tier}]\`` : '';
         const value = typeof entry.metricValue === 'number' ? entry.metricValue.toLocaleString() : entry.metricValue;
         let line = `${medal} **${entry.username}**${tier} — **${value}** ${entry.metricLabel}`;
 
@@ -272,32 +283,42 @@ export class DiscordEmbeds {
       .setDescription(
         `Welcome to **DevGuild**! DevGuild turns daily LeetCode practice into an interactive, gamified RPG where consistency, teamwork, and problem-solving level you up.\n\n` +
           `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `🚀 **1. Getting Started (Setup & Linking)**\n` +
-          `• **/link \`<username>\`**: Connect your official LeetCode account.\n` +
-          `  - You’ll receive a unique verification token.\n` +
-          `  - Paste it into your LeetCode profile **"About Me"** bio and click **Verify**.\n` +
-          `• **/sync**: Instantly sync your latest solves and update your rank on the fly!\n` +
-          `• **/profile**: View your real-time stats, current streak, LeetCode contest rating, and rank tier.\n\n` +
-          `🔥 **2. Daily Streaks & XP System**\n` +
-          `• **Solve daily**: Every day you solve at least 1 problem keeps your streak alive.\n` +
-          `• **Streak Multipliers**: Earn an additional **+2% XP per day** of your active streak (up to **+50% bonus!**).\n` +
-          `• **Anti-Farming Protection**: Spamming easy questions triggers diminishing returns to encourage true skill progression.\n\n` +
-          `👹 **3. Raid Boss Battles & Contests**\n` +
-          `• **/boss**: Check countdowns for the next official LeetCode Weekly and Biweekly contests.\n` +
-          `• During contests, the bot launches an automated server-wide **Mega Boss Raid**.\n` +
-          `• Every problem you solve deals damage to the boss. Slay the boss together to earn server-wide loot!\n\n` +
-          `⚔️ **4. Duels & Squads**\n` +
-          `• **/challenge create**: Challenge your server peers to 1v1, 2v2, or 3v3 solve matches.\n` +
-          `• **/team create \`<name>\` \`<tag>\`**: Create a permanent squad (e.g. \`[DEV] CodeCrushers\`).\n` +
-          `• **/team stats \`<tag>\`**: Track squad rosters and collective power.\n\n` +
-          `🏆 **5. Leaderboards & Analytics**\n` +
-          `• **/leaderboard weekly**: Weekly XP leaderboard — resets Sunday midnight UTC.\n` +
-          `• **/leaderboard streak**: Highest current consecutive days.\n` +
-          `• **/leaderboard consistency**: Reliability score tracking.\n` +
-          `• **/leaderboard contests**: Boss battle damage dealers.\n` +
-          `• **/recap daily**: See who solved problems today and what questions they tackled.\n` +
-          `• **/recap wrapped**: Generate your monthly summary graphic.\n\n` +
-          `🔔 **Role Mentions**: Every time someone solves a question or a daily recap is posted, the **@DEV** role is notified in the alert channel!`,
+          `🚀 **1. Getting Started**\n` +
+          `• **/link \`<username>\`**: Connect your official LeetCode account with a bio token verification.\n` +
+          `• **/sync**: Check LeetCode for new submissions and broadcast your latest solves.\n` +
+          `• **/profile**: View your real-time stats, current streak, guild rank title, and XP.\n\n` +
+          `👑 **2. Guild Rank Hierarchy (RPG Ladder)**\n` +
+          `• 🪵 **Code Initiate**: 0 – 749 XP\n` +
+          `• 🛡️ **Logic Sentinel**: 750 – 2,499 XP\n` +
+          `• 🗡️ **Algorithm Bladesmith**: 2,500 – 5,999 XP\n` +
+          `• 🧙‍♂️ **Recursion Sorcerer**: 6,000 – 11,999 XP *(Reliability ≥ 70%)*\n` +
+          `• ⚡ **Dynamic Conjurer**: 12,000 – 19,999 XP *(Reliability ≥ 80%)*\n` +
+          `• 🐉 **Raid Champion**: 20,000 – 34,999 XP *(Reliability ≥ 85% + 3 Contests)*\n` +
+          `• 👑 **Mythic Architect**: 35,000+ XP *(Reliability ≥ 90% + 5 Contests + 5 Duel Wins)*\n\n` +
+          `⭐ **3. Problem Solve XP Economy**\n` +
+          `• 🟩 **Easy**: **25 XP**  |  🟨 **Medium**: **60 XP**  |  🟥 **Hard**: **150 XP**\n` +
+          `• **Relaxed Anti-Farming**: Solve alongside course lectures without penalty!\n` +
+          `  - Solves 1–10 (Easy): **100% full XP**\n` +
+          `  - Solves 11–20 (Easy): **80% XP**\n` +
+          `  - Solves 21+ (Easy): **50% XP floor**\n` +
+          `  - *Medium and Hard problems NEVER face diminishing returns (always 100% XP)!*\n\n` +
+          `🔥 **4. Streaks & Milestone Bursts**\n` +
+          `• **Streak Multiplier**: Earn **+2% bonus XP per day** of your active streak (up to **+50% bonus**).\n` +
+          `• **Milestone XP Bursts** (awarded automatically upon reaching):\n` +
+          `  - **7 Days**: +100 XP  |  **14 Days**: +250 XP  |  **30 Days**: +600 XP\n` +
+          `  - **60 Days**: +1,500 XP  |  **90 Days**: +2,500 XP  |  **180 Days**: +5,000 XP\n` +
+          `  - **365 Days**: 🌟 **+12,000 XP**\n\n` +
+          `👹 **5. Boss Battle Raids & Contests**\n` +
+          `• **/boss**: View countdown radar for the next official LeetCode Weekly and Biweekly contests.\n` +
+          `• During contests, participate in the server-wide **Mega Boss Raid**.\n` +
+          `• Solve contest problems to deal damage: Q1: 100 | Q2: 250 | Q3: 600 | Q4: 1,500 DMG.\n` +
+          `• ⚡ **Critical Strikes**: Solves in the first 30 minutes deal **+25% Critical Damage**!\n\n` +
+          `🏆 **6. Leaderboards & Squads**\n` +
+          `• **/leaderboard all**: Cumulative all-time Guild XP, problems solved breakdown, and contest ratings.\n` +
+          `• **/leaderboard weekly / streak / consistency / contests**: Specialized seasonal rankings.\n` +
+          `• **/challenge create**: Challenge peers to 1v1, 2v2, or 3v3 solve matches.\n` +
+          `• **/team create** & **/team stats**: Create permanent squads and rosters.\n` +
+          `• 🔔 The **@DEV** role is tagged automatically on solves and daily digest recaps!`,
       )
       .setFooter({ text: 'DevGuild • Consistency Over Intensity • Happy Coding! 💻' })
       .setTimestamp();

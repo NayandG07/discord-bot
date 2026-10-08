@@ -3,7 +3,17 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { XpService } from '../xp/xp.service';
 import { IngestSubmissionDto, ActivityCreatedEventPayload } from './activity.types';
-import { ProblemDifficulty, TopicCategory } from '@prisma/client';
+import { ProblemDifficulty, TopicCategory, XpSource } from '@prisma/client';
+
+export const STREAK_MILESTONES: Record<number, number> = {
+  7: 100,
+  14: 250,
+  30: 600,
+  60: 1500,
+  90: 2500,
+  180: 5000,
+  365: 12000,
+};
 
 @Injectable()
 export class ActivityService {
@@ -151,6 +161,31 @@ export class ActivityService {
         });
       }
 
+      // Check and award streak milestone bonus
+      const milestoneBonus = STREAK_MILESTONES[updatedStreak];
+      if (milestoneBonus && updatedStreak > user.currentStreak) {
+        await tx.xPTransactions.create({
+          data: {
+            userId: dto.userId,
+            guildId: dto.guildId,
+            activityId: activity.id,
+            source: XpSource.STREAK_BONUS,
+            baseAmount: milestoneBonus,
+            multiplier: 1.0,
+            diminishingRate: 1.0,
+            finalAmount: milestoneBonus,
+            reason: `🔥 Reached ${updatedStreak}-day streak milestone! (+${milestoneBonus} XP bonus)`,
+          },
+        });
+
+        if (dto.guildId) {
+          await tx.guildMember.updateMany({
+            where: { guildId: dto.guildId, userId: dto.userId },
+            data: { guildXp: { increment: milestoneBonus } },
+          });
+        }
+      }
+
       return activity;
     });
 
@@ -164,6 +199,7 @@ export class ActivityService {
       problemSlug: dto.problemSlug,
       problemTitle: dto.problemTitle,
       submissionTimestamp: dto.submissionTimestamp,
+      xpAwarded: xpCalc.finalAmount,
     };
 
     this.eventEmitter.emit('activity.created', eventPayload);

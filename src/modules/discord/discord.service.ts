@@ -1178,7 +1178,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         const notifConfig = membership.guild.notificationConfig;
         if (notifConfig && notifConfig.enableActivityAlerts && notifConfig.activityChannelId) {
           try {
-            const embed = DiscordEmbeds.createSolveAlertEmbed(user, event);
+            const embed = DiscordEmbeds.createSolveAlertEmbed(user, event, event.xpAwarded);
             const { mention, roleId } = await this.getDevRoleMention(membership.guild.discordGuildId);
 
             await this.sendMessageToChannel(notifConfig.activityChannelId, {
@@ -1291,12 +1291,33 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Returns a configured webhook URL for an alert channel.
-   * Read securely from DISCORD_ALERT_WEBHOOK_URL environment variable.
+   * Checks DISCORD_ALERT_WEBHOOK_URL environment variable first,
+   * then falls back to the database NotificationConfig for resilient delivery on Render.
    * Enables complete bypass of Cloudflare Error 1015 IP rate limits on Render.
    */
-  getWebhookUrlForChannel(channelId: string): string | null {
+  async getWebhookUrlForChannel(channelId: string): Promise<string | null> {
     const envWebhook = this.config.get<string>('DISCORD_ALERT_WEBHOOK_URL')?.trim();
     if (envWebhook) return envWebhook;
+
+    try {
+      const config = await this.prisma.notificationConfig.findFirst({
+        where: {
+          OR: [
+            { activityChannelId: channelId },
+            { recapChannelId: channelId },
+            { bossBattleChannelId: channelId },
+            { challengeChannelId: channelId },
+            { webhookUrl: { not: null } },
+          ],
+        },
+      });
+      if (config?.webhookUrl) {
+        return config.webhookUrl.trim();
+      }
+    } catch (err: any) {
+      this.logger.warn(`Failed to retrieve webhookUrl from database: ${err.message}`);
+    }
+
     return null;
   }
 
@@ -1454,7 +1475,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     }
 
     // 2. Try Discord Webhook (bypasses Cloudflare Error 1015 on Render)
-    const webhookUrl = this.getWebhookUrlForChannel(channelId);
+    const webhookUrl = await this.getWebhookUrlForChannel(channelId);
     if (webhookUrl) {
       const webhookSuccess = await this.sendWebhookMessage(webhookUrl, payload);
       if (webhookSuccess) return;

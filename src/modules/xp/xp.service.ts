@@ -26,13 +26,13 @@ export class XpService {
       globalConfig = await this.prisma.xpConfig.create({
         data: {
           guildId: null,
-          baseEasyXp: 10,
-          baseMediumXp: 30,
-          baseHardXp: 75,
-          easyTier1Threshold: 3,
-          easyTier2Threshold: 6,
-          easyTier3Threshold: 10,
-          easyFloorPercent: 25,
+          baseEasyXp: 25,
+          baseMediumXp: 60,
+          baseHardXp: 150,
+          easyTier1Threshold: 10,
+          easyTier2Threshold: 20,
+          easyTier3Threshold: 30,
+          easyFloorPercent: 50,
           streakBonusRate: 0.02,
           streakBonusCap: 0.50,
         },
@@ -43,14 +43,12 @@ export class XpService {
   }
 
   calculateDiminishingRate(easyCount: number, config: any): number {
-    if (easyCount <= config.easyTier1Threshold) {
+    if (easyCount <= (config.easyTier1Threshold || 10)) {
       return 1.0;
-    } else if (easyCount <= config.easyTier2Threshold) {
-      return 0.75;
-    } else if (easyCount <= config.easyTier3Threshold) {
-      return 0.50;
+    } else if (easyCount <= (config.easyTier2Threshold || 20)) {
+      return 0.8;
     } else {
-      return config.easyFloorPercent / 100.0;
+      return (config.easyFloorPercent || 50) / 100.0;
     }
   }
 

@@ -22,4 +22,5 @@ export interface ActivityCreatedEventPayload {
   problemSlug: string;
   problemTitle: string;
   submissionTimestamp: Date;
+  xpAwarded?: number;
 }
