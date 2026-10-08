@@ -7,9 +7,10 @@ import { ReliabilityModule } from '../reliability/reliability.module';
 import { RecapModule } from '../recaps/recap.module';
 import { ActivityModule } from '../activity/activity.module';
 import { LeaderboardModule } from '../leaderboards/leaderboard.module';
+import { GoalModule } from '../goals/goal.module';
 
 @Module({
-  imports: [ConfigModule, LeetCodeModule, ReliabilityModule, RecapModule, ActivityModule, LeaderboardModule],
+  imports: [ConfigModule, LeetCodeModule, ReliabilityModule, RecapModule, ActivityModule, LeaderboardModule, GoalModule],
   controllers: [DiscordInteractionsController],
   providers: [DiscordService],
   exports: [DiscordService],

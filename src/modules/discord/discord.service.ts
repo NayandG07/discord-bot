@@ -17,11 +17,12 @@ import { LeetCodeService } from '../leetcode/leetcode.service';
 import { ReliabilityService } from '../reliability/reliability.service';
 import { RecapService } from '../recaps/recap.service';
 import { ActivityService } from '../activity/activity.service';
-import { ProblemDifficulty } from '@prisma/client';
+import { ProblemDifficulty, GoalPeriod } from '@prisma/client';
 import { DiscordEmbeds } from './discord-embeds';
 import { SLASH_COMMANDS } from './discord.commands';
 import { ActivityCreatedEventPayload } from '../activity/activity.types';
 import { LeaderboardService } from '../leaderboards/leaderboard.service';
+import { GoalService } from '../goals/goal.service';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -32,6 +33,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   private readonly httpFollowUpTimeoutMs = 10_000;
   private client: Client;
   private devRoleCache = new Map<string, string>();
+  private goalCheckInterval?: NodeJS.Timeout;
 
   constructor(
     private readonly config: ConfigService,
@@ -41,6 +43,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     private readonly recap: RecapService,
     private readonly activity: ActivityService,
     private readonly leaderboard?: LeaderboardService,
+    private readonly goalService?: GoalService,
   ) {
     this.client = new Client({
       intents: [GatewayIntentBits.Guilds],
@@ -64,6 +67,16 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     this.initDiscord(token).catch((err) => {
       this.logger.error(`Discord initialization error: ${err.message}`, err.stack);
     });
+
+    // Start background accountability runner for goals (periodic reminders and penalty enforcement)
+    this.goalCheckInterval = setInterval(async () => {
+      try {
+        await this.processGoalEvaluations();
+        await this.processGoalReminders();
+      } catch (err: any) {
+        this.logger.error(`Error in goal accountability background runner: ${err.message}`);
+      }
+    }, 10 * 60 * 1000); // Check every 10 minutes
   }
 
   private async initDiscord(token: string) {
@@ -82,6 +95,9 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
+    if (this.goalCheckInterval) {
+      clearInterval(this.goalCheckInterval);
+    }
     if (this.client) {
       this.logger.log('Destroying Discord client connection...');
       await this.client.destroy();
@@ -1199,6 +1215,57 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     } else if (commandName === 'guide') {
       const embed = DiscordEmbeds.createGuideEmbed();
       await interaction.reply({ embeds: [embed] });
+    } else if (commandName === 'goal') {
+      if (!this.goalService) {
+        await interaction.reply({ content: '⚠️ Goal service is currently unavailable.', flags: 64 });
+        return;
+      }
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'day' || sub === 'week') {
+        const num = interaction.options.getInteger('num', true);
+        await interaction.deferReply();
+        const goal = await this.withTimeout(
+          this.goalService.setGoal({
+            discordUserId: interaction.user.id,
+            discordGuildId: interaction.guildId ?? undefined,
+            period: sub === 'day' ? GoalPeriod.DAY : GoalPeriod.WEEK,
+            targetCount: num,
+          }),
+          this.externalOperationTimeoutMs,
+          'Setting goal',
+        );
+        const embed = DiscordEmbeds.createGoalSetEmbed(goal);
+        await interaction.editReply({ embeds: [embed] });
+      } else if (sub === 'status') {
+        await interaction.deferReply();
+        const goals = await this.withTimeout(
+          this.goalService.getUserActiveGoals(interaction.user.id),
+          this.externalOperationTimeoutMs,
+          'Fetching goals',
+        );
+        const embed = DiscordEmbeds.createGoalStatusEmbed(goals, interaction.user.username);
+        await interaction.editReply({ embeds: [embed] });
+      } else if (sub === 'cancel') {
+        const periodChoice = interaction.options.getString('period', true);
+        await interaction.deferReply({ flags: 64 });
+        const period = periodChoice === 'day' ? GoalPeriod.DAY : GoalPeriod.WEEK;
+        const count = await this.withTimeout(
+          this.goalService.cancelGoal(interaction.user.id, period),
+          this.externalOperationTimeoutMs,
+          'Cancelling goal',
+        );
+        if (count > 0) {
+          await interaction.editReply({
+            content: `✅ Cancelled your active ${periodChoice} goal. Set a new one anytime with \`/goal\`.`,
+          });
+        } else {
+          await interaction.editReply({
+            content: `ℹ️ You do not have an active ${periodChoice} goal to cancel.`,
+          });
+        }
+      } else {
+        await interaction.reply({ content: '❌ Unknown goal subcommand.', flags: 64 });
+      }
     } else {
       await interaction.reply({ content: `Command \`/${commandName}\` acknowledged!`, flags: 64 });
     }
@@ -1214,11 +1281,29 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
 
       if (!user) return;
 
+      // Check active goal progress for this user
+      let goalProgressSummary: { current: number; target: number; period: string } | undefined;
+      if (this.goalService) {
+        try {
+          const activeGoals = await this.goalService.getUserActiveGoals(user.discordId);
+          if (activeGoals.length > 0) {
+            const primaryGoal = activeGoals[0];
+            goalProgressSummary = {
+              current: primaryGoal.currentCount,
+              target: primaryGoal.targetCount,
+              period: primaryGoal.period === 'DAY' ? 'Daily' : 'Weekly',
+            };
+          }
+        } catch (gErr: any) {
+          this.logger.warn(`Could not fetch goal progress for alert: ${gErr.message}`);
+        }
+      }
+
       for (const membership of user.guildMemberships) {
         const notifConfig = membership.guild.notificationConfig;
         if (notifConfig && notifConfig.enableActivityAlerts && notifConfig.activityChannelId) {
           try {
-            const embed = DiscordEmbeds.createSolveAlertEmbed(user, event, event.xpAwarded);
+            const embed = DiscordEmbeds.createSolveAlertEmbed(user, event, event.xpAwarded, goalProgressSummary);
             const { mention, roleId } = await this.getDevRoleMention(membership.guild.discordGuildId);
 
             await this.sendMessageToChannel(notifConfig.activityChannelId, {
@@ -1457,6 +1542,63 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         resolve(false);
       });
     });
+  }
+
+  /**
+   * Processes active goals that are due for a reminder.
+   * Dispatches automated alerts to the guild's activity channel, tagging the user ONLY!
+   */
+  async processGoalReminders(): Promise<void> {
+    if (!this.goalService) return;
+    try {
+      const candidates = await this.goalService.getGoalsDueForReminder();
+      for (const candidate of candidates) {
+        if (!candidate.activityChannelId) continue;
+        try {
+          const embed = DiscordEmbeds.createGoalReminderEmbed(candidate);
+          // Tag the user ONLY in the automated alerts channel
+          await this.sendMessageToChannel(candidate.activityChannelId, {
+            content: `⏰ <@${candidate.discordId}> **Accountability Reminder!**`,
+            embeds: [embed],
+            allowed_mentions: { users: [candidate.discordId] },
+          });
+          await this.goalService.recordReminderSent(candidate.goalId);
+          this.logger.log(`Broadcasted automated goal reminder to <@${candidate.discordId}> in channel ${candidate.activityChannelId}`);
+        } catch (candErr: any) {
+          this.logger.warn(`Could not send goal reminder to channel ${candidate.activityChannelId}: ${candErr.message}`);
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(`Error in processGoalReminders: ${err.message}`);
+    }
+  }
+
+  /**
+   * Evaluates expired goals, applies penalties if targets were missed,
+   * and dispatches penalty notices to the guild's activity channel, tagging the user ONLY!
+   */
+  async processGoalEvaluations(): Promise<void> {
+    if (!this.goalService) return;
+    try {
+      const evalResult = await this.goalService.evaluateExpiredGoals();
+      for (const penalty of evalResult.penalties) {
+        if (!penalty.activityChannelId) continue;
+        try {
+          const embed = DiscordEmbeds.createGoalPenaltyEmbed(penalty);
+          // Tag the user ONLY in the automated alerts channel
+          await this.sendMessageToChannel(penalty.activityChannelId, {
+            content: `⚠️ <@${penalty.discordId}> **Accountability Enforcement: Target Missed!**`,
+            embeds: [embed],
+            allowed_mentions: { users: [penalty.discordId] },
+          });
+          this.logger.log(`Broadcasted automated goal penalty notice for <@${penalty.discordId}> in channel ${penalty.activityChannelId}`);
+        } catch (penErr: any) {
+          this.logger.warn(`Could not send goal penalty alert to channel ${penalty.activityChannelId}: ${penErr.message}`);
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(`Error in processGoalEvaluations: ${err.message}`);
+    }
   }
 
   async broadcastDailyRecapToAllGuilds() {

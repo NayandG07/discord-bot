@@ -61,6 +61,19 @@ enum XpSource {
   ACHIEVEMENT_UNLOCK
   ADMIN_ADJUSTMENT
   SEASON_REWARD
+  GOAL_PENALTY
+}
+
+enum GoalPeriod {
+  DAY
+  WEEK
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  FAILED
+  CANCELLED
 }
 
 enum ChallengeFormat {
@@ -176,6 +189,7 @@ model User {
   userAchievements         UserAchievement[]
   seasonSnapshots          SeasonLeaderboardSnapshot[]
   recaps                   Recap[]
+  goals                    UserGoal[]
 
   @@index([discordId])
   @@index([lastActiveAt])
@@ -230,6 +244,7 @@ model Guild {
   seasonSnapshots    SeasonLeaderboardSnapshot[]
   recaps             Recap[]
   xpTransactions     XPTransactions[]
+  userGoals          UserGoal[]
 
   @@index([discordGuildId])
   @@map("guilds")
@@ -639,4 +654,33 @@ model AuditLog {
   @@index([adminUserId, createdAt])
   @@index([action])
   @@map("audit_logs")
+}
+
+model UserGoal {
+  id                 String     @id @default(uuid()) @db.Uuid
+  userId             String     @db.Uuid
+  guildId            String?    @db.Uuid
+  period             GoalPeriod
+  targetCount        Int
+  currentCount       Int        @default(0)
+  status             GoalStatus @default(ACTIVE)
+  startsAt           DateTime   @db.Timestamptz(6)
+  endsAt             DateTime   @db.Timestamptz(6)
+  lastReminderAt     DateTime?  @db.Timestamptz(6)
+  penaltyApplied     Boolean    @default(false)
+  penaltyXp          Int?
+  penaltyReliability Decimal?   @db.Decimal(5, 2)
+  completedAt        DateTime?  @db.Timestamptz(6)
+  failedAt           DateTime?  @db.Timestamptz(6)
+  createdAt          DateTime   @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime   @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  guild Guild? @relation(fields: [guildId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status])
+  @@index([status, endsAt])
+  @@index([guildId, status])
+  @@map("user_goals")
 }

@@ -117,7 +117,20 @@ export class DiscordEmbeds {
       .setTimestamp();
   }
 
-  static createSolveAlertEmbed(user: any, activity: any, xpAwarded?: number): EmbedBuilder {
+  static renderProgressBar(current: number, total: number, length: number = 10): string {
+    if (total <= 0) return '■'.repeat(length);
+    const progress = Math.min(1, Math.max(0, current / total));
+    const filled = Math.round(progress * length);
+    const empty = length - filled;
+    return '■'.repeat(filled) + '□'.repeat(empty);
+  }
+
+  static createSolveAlertEmbed(
+    user: any,
+    activity: any,
+    xpAwarded?: number,
+    goalProgress?: { current: number; target: number; period: string },
+  ): EmbedBuilder {
     const diffEmoji = activity.difficulty === 'HARD' ? '🟥' : activity.difficulty === 'MEDIUM' ? '🟨' : '🟩';
     const color = activity.difficulty === 'HARD' ? 0xff1744 : activity.difficulty === 'MEDIUM' ? 0xffd700 : 0x00e676;
 
@@ -137,6 +150,17 @@ export class DiscordEmbeds {
 
     if (xpAwarded) {
       embed.addFields({ name: 'XP Awarded', value: `⭐ **+${xpAwarded} XP**`, inline: true });
+    }
+
+    if (goalProgress) {
+      const isMet = goalProgress.current >= goalProgress.target;
+      embed.addFields({
+        name: `🎯 ${goalProgress.period} Goal`,
+        value: isMet
+          ? `✅ **Target Achieved!** (${goalProgress.current}/${goalProgress.target})`
+          : `⏳ **${goalProgress.current}/${goalProgress.target} Solved** (${goalProgress.target - goalProgress.current} left)`,
+        inline: true,
+      });
     }
 
     if (user.avatarUrl) {
@@ -358,10 +382,123 @@ export class DiscordEmbeds {
           `• **/leaderboard all**: Cumulative all-time Guild XP, problems solved breakdown, and contest ratings.\n` +
           `• **/leaderboard weekly / streak / consistency / contests**: Specialized seasonal rankings.\n` +
           `• **/challenge create**: Challenge peers to 1v1, 2v2, or 3v3 solve matches.\n` +
-          `• **/team create** & **/team stats**: Create permanent squads and rosters.\n` +
-          `• 🔔 The **@DEV** role is tagged automatically on solves and daily digest recaps!`,
+          `• **/team create** & **/team stats**: Create permanent squads and rosters.\n\n` +
+          `🎯 **7. Personal Goals & Strict Accountability**\n` +
+          `• **/goal day \`<num>\`**: Lock in a daily target of problems to solve today before midnight UTC.\n` +
+          `• **/goal week \`<num>\`**: Lock in a weekly target of problems to solve before Sunday midnight UTC.\n` +
+          `• **/goal status**: Check live progress, progress bars, deadlines, and penalties at risk.\n` +
+          `• **/goal cancel**: Cancel an active goal.\n` +
+          `• ⏰ **Automated Reminders**: Reminders are delivered to the activity channel, tagging **you only**.\n` +
+          `• ⚠️ **Accountability Clause**: Completing goals awards **NO bonuses** (discipline is its own reward). If you fail to hit your target before deadline, you are **PENALIZED**:\n` +
+          `  - Daily failure: **-50 XP** and **-5.0% Reliability**\n` +
+          `  - Weekly failure: **-150 XP** and **-10.0% Reliability**\n\n` +
+          `• 🔔 The **@DEV** role is tagged automatically on solves and digest recaps!`,
       )
       .setFooter({ text: 'DevGuild • Consistency Over Intensity • Happy Coding! 💻' })
+      .setTimestamp();
+  }
+
+  static createGoalSetEmbed(goal: any): EmbedBuilder {
+    const periodLabel = goal.period === 'DAY' ? 'Daily' : 'Weekly';
+    const endUnix = Math.floor(new Date(goal.endsAt).getTime() / 1000);
+    const isCompleted = goal.isComplete;
+
+    return new EmbedBuilder()
+      .setTitle(`🎯 ${periodLabel} Goal Locked: ${goal.targetCount} Problems!`)
+      .setColor(isCompleted ? 0x2ecc71 : 0x5865f2)
+      .setDescription(
+        `You have committed to solve **${goal.targetCount} problem${goal.targetCount === 1 ? '' : 's'}** ${goal.period === 'DAY' ? 'today' : 'this week'}.\n\n` +
+          `• **Current Progress**: **${goal.currentCount}/${goal.targetCount}** solved\n` +
+          `• **Remaining Needed**: **${goal.remaining}** problem${goal.remaining === 1 ? '' : 's'}\n` +
+          `• **Deadline**: <t:${endUnix}:F> (<t:${endUnix}:R>)\n\n` +
+          `⚠️ **ACCOUNTABILITY CLAUSE (STRICT ENFORCEMENT)**:\n` +
+          `• If you **fail** to hit your target before the deadline, you will be penalized:\n` +
+          `  - 📉 **-${goal.penaltyXp} Guild XP**\n` +
+          `  - 📉 **-${Number(goal.penaltyReliability).toFixed(1)}% Reliability Score**\n` +
+          `• **NO BONUSES**: Fulfilling this goal does NOT grant bonus XP or multipliers. This is for pure accountability and discipline.`,
+      )
+      .setFooter({ text: 'DevGuild Accountability Engine • Automated Reminder Alerts Enabled' })
+      .setTimestamp();
+  }
+
+  static createGoalStatusEmbed(goals: any[], username: string): EmbedBuilder {
+    const embed = new EmbedBuilder()
+      .setTitle(`🎯 Active Goals & Accountability — ${username}`)
+      .setColor(0x5865f2)
+      .setTimestamp();
+
+    if (goals.length === 0) {
+      embed.setDescription(
+        `You currently have no active goals.\n\n` +
+          `Use \`/goal day num:<count>\` to set a daily goal, or \`/goal week num:<count>\` for a weekly target!`,
+      );
+      return embed;
+    }
+
+    const goalDescriptions = goals.map((g) => {
+      const periodLabel = g.period === 'DAY' ? 'Daily Goal' : 'Weekly Goal';
+      const endUnix = Math.floor(new Date(g.endsAt).getTime() / 1000);
+      const progressBar = DiscordEmbeds.renderProgressBar(g.currentCount, g.targetCount, 10);
+      const statusIcon = g.isComplete ? '✅ **Target Met!**' : `⏳ **${g.remaining} left**`;
+
+      return (
+        `📌 **${periodLabel}**: **${g.targetCount} Problems**\n` +
+        `• Progress: \`[${progressBar}]\` **${g.currentCount}/${g.targetCount}** (${statusIcon})\n` +
+        `• Deadline: <t:${endUnix}:R> (<t:${endUnix}:t>)\n` +
+        `• Penalty at Risk: **-${g.penaltyXp} XP** | **-${Number(g.penaltyReliability).toFixed(1)}% Reliability**`
+      );
+    });
+
+    embed.setDescription(
+      `Here is your live goal status. Hit your targets before the deadline to protect your XP and Reliability!\n\n` +
+        goalDescriptions.join('\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n') +
+        `\n\n*Note: Goals yield no bonuses upon completion. Failing a goal enforces penalties immediately.*`,
+    );
+
+    return embed;
+  }
+
+  static createGoalReminderEmbed(candidate: any): EmbedBuilder {
+    const periodLabel = candidate.period === 'DAY' ? 'Daily' : 'Weekly';
+    const endUnix = Math.floor(new Date(candidate.endsAt).getTime() / 1000);
+    const progressBar = DiscordEmbeds.renderProgressBar(candidate.currentCount, candidate.targetCount, 10);
+
+    return new EmbedBuilder()
+      .setTitle(`⏰ TARGET REMINDER: ${periodLabel} Goal`)
+      .setColor(0xe67e22)
+      .setDescription(
+        `Friendly nudge! You pledged to solve **${candidate.targetCount} problem${candidate.targetCount === 1 ? '' : 's'}** ${candidate.period === 'DAY' ? 'today' : 'this week'}.\n\n` +
+          `• **Progress**: \`[${progressBar}]\` **${candidate.currentCount}/${candidate.targetCount}** solved\n` +
+          `• **Remaining**: **${candidate.remaining}** problem${candidate.remaining === 1 ? '' : 's'} needed\n` +
+          `• **Time Left**: <t:${endUnix}:R> (<t:${endUnix}:F>)\n\n` +
+          `⚠️ **Penalty at Risk**:\n` +
+          `Failure will cost you **-${candidate.penaltyXp} XP** and **-${Number(candidate.penaltyReliability).toFixed(1)}% Reliability Score**!\n\n` +
+          `*Fire up LeetCode and finish your target!* 💻`,
+      )
+      .setFooter({ text: 'DevGuild Accountability Radar' })
+      .setTimestamp();
+  }
+
+  static createGoalPenaltyEmbed(penalty: {
+    period: string;
+    targetCount: number;
+    completedCount: number;
+    penaltyXp: number;
+    penaltyReliability: number;
+  }): EmbedBuilder {
+    return new EmbedBuilder()
+      .setTitle('⚠️ GOAL FAILED — PENALTY ENFORCED')
+      .setColor(0xed4245)
+      .setDescription(
+        `The deadline for your **${penalty.period === 'DAY' ? 'Daily' : 'Weekly'} Goal** has passed.\n\n` +
+          `• Target: **${penalty.targetCount} problems**\n` +
+          `• Solved: **${penalty.completedCount}/${penalty.targetCount}**\n\n` +
+          `💥 **PENALTIES APPLIED**:\n` +
+          `• 📉 **-${penalty.penaltyXp} Guild XP** deducted from your profile\n` +
+          `• 📉 **-${Number(penalty.penaltyReliability).toFixed(1)}% Reliability Score** deducted\n\n` +
+          `*Accountability is hard, but consistency is key. Dust yourself off and set a new goal with \`/goal\`!*`,
+      )
+      .setFooter({ text: 'DevGuild Accountability Engine' })
       .setTimestamp();
   }
 }

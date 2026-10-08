@@ -128,4 +128,54 @@ export const SLASH_COMMANDS = [
   new SlashCommandBuilder()
     .setName('guide')
     .setDescription('Explore DevGuild features, rules, XP mechanics, and how to play'),
+
+  new SlashCommandBuilder()
+    .setName('goal')
+    .setDescription('Set problem-solving goals with accountability (penalties on failure; no bonuses)')
+    .addSubcommand((sub) =>
+      sub
+        .setName('day')
+        .setDescription('Set a daily problem-solving goal for today')
+        .addIntegerOption((opt) =>
+          opt
+            .setName('num')
+            .setDescription('Number of problems to solve today (1-50)')
+            .setRequired(true)
+            .setMinValue(1)
+            .setMaxValue(50),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('week')
+        .setDescription('Set a weekly problem-solving goal for this week')
+        .addIntegerOption((opt) =>
+          opt
+            .setName('num')
+            .setDescription('Number of problems to solve this week (1-200)')
+            .setRequired(true)
+            .setMinValue(1)
+            .setMaxValue(200),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('status')
+        .setDescription('View your active daily and weekly goals and current progress'),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('cancel')
+        .setDescription('Cancel an active goal')
+        .addStringOption((opt) =>
+          opt
+            .setName('period')
+            .setDescription('Which goal to cancel')
+            .setRequired(true)
+            .addChoices(
+              { name: 'Daily Goal', value: 'day' },
+              { name: 'Weekly Goal', value: 'week' },
+            ),
+        ),
+    ),
 ];

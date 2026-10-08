@@ -19,6 +19,7 @@ import { TeamModule } from './modules/teams/team.module';
 import { DiscordModule } from './modules/discord/discord.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { HealthModule } from './modules/health/health.module';
+import { GoalModule } from './modules/goals/goal.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { HealthModule } from './modules/health/health.module';
     DiscordModule,
     AdminModule,
     HealthModule,
+    GoalModule,
   ],
 })
 export class AppModule {}
