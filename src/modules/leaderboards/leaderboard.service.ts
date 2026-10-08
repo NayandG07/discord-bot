@@ -5,6 +5,40 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 export class LeaderboardService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async getCumulativeLeaderboard(guildId: string, limit = 10) {
+    const members = await this.prisma.guildMember.findMany({
+      where: { guildId },
+      include: {
+        user: {
+          include: {
+            leetCodeProfile: true,
+          },
+        },
+      },
+      orderBy: { guildXp: 'desc' },
+      take: limit,
+    });
+
+    return members.map((m, index) => {
+      const profile = m.user.leetCodeProfile;
+      return {
+        rank: index + 1,
+        userId: m.userId,
+        username: m.user.username,
+        avatarUrl: m.user.avatarUrl,
+        metricLabel: 'Guild XP',
+        metricValue: Number(m.guildXp),
+        tier: m.guildRank,
+        totalSolved: profile?.totalSolved ?? 0,
+        easy: profile?.easySolved ?? 0,
+        medium: profile?.mediumSolved ?? 0,
+        hard: profile?.hardSolved ?? 0,
+        streak: m.user.currentStreak,
+        contestRating: profile?.contestRating ? Number(profile.contestRating) : undefined,
+      };
+    });
+  }
+
   async getWeeklyLeaderboard(guildId: string, limit = 10) {
     const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
@@ -23,7 +57,15 @@ export class LeaderboardService {
 
     const populated = await Promise.all(
       results.map(async (row, index) => {
-        const user = await this.prisma.user.findUnique({ where: { id: row.userId } });
+        const user = await this.prisma.user.findUnique({
+          where: { id: row.userId },
+          include: {
+            leetCodeProfile: true,
+            guildMemberships: { where: { guildId } },
+          },
+        });
+        const member = user?.guildMemberships?.[0];
+        const profile = user?.leetCodeProfile;
         return {
           rank: index + 1,
           userId: row.userId,
@@ -31,6 +73,13 @@ export class LeaderboardService {
           avatarUrl: user?.avatarUrl,
           metricLabel: 'Weekly XP',
           metricValue: row._sum.finalAmount || 0,
+          tier: member?.guildRank,
+          totalSolved: profile?.totalSolved,
+          easy: profile?.easySolved,
+          medium: profile?.mediumSolved,
+          hard: profile?.hardSolved,
+          streak: user?.currentStreak,
+          contestRating: profile?.contestRating ? Number(profile.contestRating) : undefined,
         };
       }),
     );
@@ -41,39 +90,69 @@ export class LeaderboardService {
   async getStreakLeaderboard(guildId: string, limit = 10) {
     const members = await this.prisma.guildMember.findMany({
       where: { guildId },
-      include: { user: true },
+      include: {
+        user: {
+          include: {
+            leetCodeProfile: true,
+          },
+        },
+      },
       orderBy: { user: { currentStreak: 'desc' } },
       take: limit,
     });
 
-    return members.map((m, index) => ({
-      rank: index + 1,
-      userId: m.userId,
-      username: m.user.username,
-      avatarUrl: m.user.avatarUrl,
-      metricLabel: 'Day Streak',
-      metricValue: m.user.currentStreak,
-      tier: m.guildRank,
-    }));
+    return members.map((m, index) => {
+      const profile = m.user.leetCodeProfile;
+      return {
+        rank: index + 1,
+        userId: m.userId,
+        username: m.user.username,
+        avatarUrl: m.user.avatarUrl,
+        metricLabel: 'Day Streak',
+        metricValue: m.user.currentStreak,
+        tier: m.guildRank,
+        totalSolved: profile?.totalSolved,
+        easy: profile?.easySolved,
+        medium: profile?.mediumSolved,
+        hard: profile?.hardSolved,
+        streak: m.user.currentStreak,
+        contestRating: profile?.contestRating ? Number(profile.contestRating) : undefined,
+      };
+    });
   }
 
   async getConsistencyLeaderboard(guildId: string, limit = 10) {
     const members = await this.prisma.guildMember.findMany({
       where: { guildId },
-      include: { user: true },
+      include: {
+        user: {
+          include: {
+            leetCodeProfile: true,
+          },
+        },
+      },
       orderBy: { user: { reliabilityScore: 'desc' } },
       take: limit,
     });
 
-    return members.map((m, index) => ({
-      rank: index + 1,
-      userId: m.userId,
-      username: m.user.username,
-      avatarUrl: m.user.avatarUrl,
-      metricLabel: 'Reliability %',
-      metricValue: Number(m.user.reliabilityScore),
-      tier: m.guildRank,
-    }));
+    return members.map((m, index) => {
+      const profile = m.user.leetCodeProfile;
+      return {
+        rank: index + 1,
+        userId: m.userId,
+        username: m.user.username,
+        avatarUrl: m.user.avatarUrl,
+        metricLabel: 'Reliability %',
+        metricValue: Number(m.user.reliabilityScore),
+        tier: m.guildRank,
+        totalSolved: profile?.totalSolved,
+        easy: profile?.easySolved,
+        medium: profile?.mediumSolved,
+        hard: profile?.hardSolved,
+        streak: m.user.currentStreak,
+        contestRating: profile?.contestRating ? Number(profile.contestRating) : undefined,
+      };
+    });
   }
 
   async getContestLeaderboard(guildId: string, limit = 10) {

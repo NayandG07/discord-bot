@@ -27,7 +27,7 @@ export class DiscordEmbeds {
       .setTimestamp();
   }
 
-  static createProfileEmbed(user: any, profile: any, rankTier: RankTier): EmbedBuilder {
+  static createProfileEmbed(user: any, profile: any, rankTier: RankTier, guildXp = 0): EmbedBuilder {
     const color = RANK_COLORS[rankTier] || 0xcd7f32;
 
     return new EmbedBuilder()
@@ -41,8 +41,8 @@ export class DiscordEmbeds {
           inline: true,
         },
         {
-          name: 'Guild Rank Tier',
-          value: `**${rankTier}**`,
+          name: 'Guild Rank & XP',
+          value: `Tier: **${rankTier}**\nTotal XP: ⭐ **${guildXp.toLocaleString()} XP**`,
           inline: true,
         },
         {
@@ -186,11 +186,31 @@ export class DiscordEmbeds {
     const description = entries
       .map((entry, idx) => {
         const medal = rankEmojis[idx] || `\`#${entry.rank}\``;
-        const tier = entry.tier ? ` [${entry.tier}]` : '';
+        const tier = entry.tier ? ` \`[${entry.tier}]\`` : '';
         const value = typeof entry.metricValue === 'number' ? entry.metricValue.toLocaleString() : entry.metricValue;
-        return `${medal} **${entry.username}**${tier} — **${value}** ${entry.metricLabel}`;
+        let line = `${medal} **${entry.username}**${tier} — **${value}** ${entry.metricLabel}`;
+
+        const details: string[] = [];
+        if (entry.totalSolved !== undefined && entry.totalSolved > 0) {
+          const breakdown =
+            entry.easy !== undefined ? ` (${entry.easy}E • ${entry.medium}M • ${entry.hard}H)` : '';
+          details.push(`🧩 **${entry.totalSolved}** Solved${breakdown}`);
+        }
+        if (entry.streak !== undefined && entry.streak > 0) {
+          details.push(`🔥 **${entry.streak}d** Streak`);
+        }
+        if (entry.contestRating && entry.contestRating > 0) {
+          details.push(`⭐ **${Math.round(Number(entry.contestRating)).toLocaleString()}** Rating`);
+        }
+        if (entry.problemsSolved !== undefined && entry.problemsSolved > 0) {
+          details.push(`⚔️ **${entry.problemsSolved}** Contest Solves`);
+        }
+        if (details.length > 0) {
+          line += `\n   └ ${details.join(' | ')}`;
+        }
+        return line;
       })
-      .join('\n');
+      .join('\n\n');
 
     embed.setDescription(description);
     return embed;

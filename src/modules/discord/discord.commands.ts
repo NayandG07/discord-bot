@@ -49,6 +49,7 @@ export const SLASH_COMMANDS = [
   new SlashCommandBuilder()
     .setName('leaderboard')
     .setDescription('View guild competitive leaderboards')
+    .addSubcommand((sub) => sub.setName('all').setDescription('Cumulative Guild XP & All-Time stats leaderboard'))
     .addSubcommand((sub) => sub.setName('weekly').setDescription('Weekly XP leaderboard'))
     .addSubcommand((sub) => sub.setName('streak').setDescription('Daily streak leaderboard'))
     .addSubcommand((sub) => sub.setName('consistency').setDescription('Reliability & consistency leaderboard'))

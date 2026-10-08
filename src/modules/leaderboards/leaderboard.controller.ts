@@ -15,7 +15,8 @@ export class LeaderboardController {
     @Query('limit') limit = 10,
   ) {
     let data = [];
-    if (type === 'weekly') data = await this.leaderboardService.getWeeklyLeaderboard(guildId, Number(limit));
+    if (type === 'all' || type === 'cumulative') data = await this.leaderboardService.getCumulativeLeaderboard(guildId, Number(limit));
+    else if (type === 'weekly') data = await this.leaderboardService.getWeeklyLeaderboard(guildId, Number(limit));
     else if (type === 'streak') data = await this.leaderboardService.getStreakLeaderboard(guildId, Number(limit));
     else if (type === 'consistency') data = await this.leaderboardService.getConsistencyLeaderboard(guildId, Number(limit));
     else if (type === 'contests') data = await this.leaderboardService.getContestLeaderboard(guildId, Number(limit));

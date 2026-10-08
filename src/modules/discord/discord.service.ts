@@ -882,8 +882,9 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
 
       const guildMember = user.guildMemberships.find((m) => m.guildId === interaction.guildId);
       const rankTier = guildMember?.guildRank || 'BRONZE';
+      const guildXp = guildMember?.guildXp ? Number(guildMember.guildXp) : 0;
 
-      const embed = DiscordEmbeds.createProfileEmbed(user, user.leetCodeProfile, rankTier as any);
+      const embed = DiscordEmbeds.createProfileEmbed(user, user.leetCodeProfile, rankTier as any, guildXp);
       await interaction.editReply({ embeds: [embed] });
     } else if (commandName === 'recap') {
       const sub = interaction.options.getSubcommand();
@@ -945,11 +946,14 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      const sub = interaction.options.getSubcommand() || 'weekly';
-      let title = 'Weekly XP';
+      const sub = interaction.options.getSubcommand() || 'all';
+      let title = 'Cumulative Guild XP & Stats';
       let entries: any[] = [];
 
-      if (sub === 'weekly') {
+      if (sub === 'all') {
+        title = 'Cumulative Guild XP & All-Time Stats';
+        entries = await this.leaderboard.getCumulativeLeaderboard(guild.id, 10);
+      } else if (sub === 'weekly') {
         title = 'Weekly XP';
         entries = await this.leaderboard.getWeeklyLeaderboard(guild.id, 10);
       } else if (sub === 'streak') {
