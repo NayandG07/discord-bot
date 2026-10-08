@@ -78,18 +78,19 @@ export class ActivityService {
   }
 
   async ingestSubmission(dto: IngestSubmissionDto) {
-    // 1. Duplicate check (idempotency)
-    const existing = await this.prisma.activity.findUnique({
+    // 1. Duplicate check (idempotency by submission ID or problem slug)
+    const existing = await this.prisma.activity.findFirst({
       where: {
-        userId_leetCodeSubmissionId: {
-          userId: dto.userId,
-          leetCodeSubmissionId: dto.leetCodeSubmissionId,
-        },
+        userId: dto.userId,
+        OR: [
+          { leetCodeSubmissionId: dto.leetCodeSubmissionId },
+          { problemSlug: dto.problemSlug },
+        ],
       },
     });
 
     if (existing) {
-      this.logger.debug(`Submission ${dto.leetCodeSubmissionId} already processed for user ${dto.userId}.`);
+      this.logger.debug(`Submission ${dto.leetCodeSubmissionId} or problem ${dto.problemSlug} already processed for user ${dto.userId}.`);
       return existing;
     }
 
@@ -116,6 +117,15 @@ export class ActivityService {
 
     // 4. Atomic persistence
     const result = await this.prisma.$transaction(async (tx) => {
+      // Resolve target guild ID if omitted (e.g. from background sync worker)
+      let targetGuildId = dto.guildId;
+      if (!targetGuildId) {
+        const member = await tx.guildMember.findFirst({ where: { userId: dto.userId } });
+        if (member) {
+          targetGuildId = member.guildId;
+        }
+      }
+
       const activity = await tx.activity.create({
         data: {
           userId: dto.userId,
@@ -143,7 +153,7 @@ export class ActivityService {
       await tx.xPTransactions.create({
         data: {
           userId: dto.userId,
-          guildId: dto.guildId,
+          guildId: targetGuildId,
           activityId: activity.id,
           source: xpCalc.source,
           baseAmount: xpCalc.baseAmount,
@@ -155,9 +165,14 @@ export class ActivityService {
         },
       });
 
-      if (dto.guildId) {
+      if (targetGuildId) {
         await tx.guildMember.updateMany({
-          where: { guildId: dto.guildId, userId: dto.userId },
+          where: { guildId: targetGuildId, userId: dto.userId },
+          data: { guildXp: { increment: xpCalc.finalAmount } },
+        });
+      } else {
+        await tx.guildMember.updateMany({
+          where: { userId: dto.userId },
           data: { guildXp: { increment: xpCalc.finalAmount } },
         });
       }
@@ -168,7 +183,7 @@ export class ActivityService {
         await tx.xPTransactions.create({
           data: {
             userId: dto.userId,
-            guildId: dto.guildId,
+            guildId: targetGuildId,
             activityId: activity.id,
             source: XpSource.STREAK_BONUS,
             baseAmount: milestoneBonus,
@@ -179,9 +194,14 @@ export class ActivityService {
           },
         });
 
-        if (dto.guildId) {
+        if (targetGuildId) {
           await tx.guildMember.updateMany({
-            where: { guildId: dto.guildId, userId: dto.userId },
+            where: { guildId: targetGuildId, userId: dto.userId },
+            data: { guildXp: { increment: milestoneBonus } },
+          });
+        } else {
+          await tx.guildMember.updateMany({
+            where: { userId: dto.userId },
             data: { guildXp: { increment: milestoneBonus } },
           });
         }

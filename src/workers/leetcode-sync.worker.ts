@@ -46,12 +46,13 @@ export function createLeetCodeSyncWorker(
                 continue;
               }
 
-              const existing = await prisma.activity.findUnique({
+              const existing = await prisma.activity.findFirst({
                 where: {
-                  userId_leetCodeSubmissionId: {
-                    userId: profile.userId,
-                    leetCodeSubmissionId: sub.id,
-                  },
+                  userId: profile.userId,
+                  OR: [
+                    { leetCodeSubmissionId: sub.id },
+                    { problemSlug: sub.titleSlug },
+                  ],
                 },
               });
               if (existing) continue;

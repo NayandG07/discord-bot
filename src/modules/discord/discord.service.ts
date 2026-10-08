@@ -85,12 +85,15 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       this.client.rest.setToken(token);
 
       this.logger.log(`Connecting DevGuild to Discord Gateway (token prefix: ${token.substring(0, 8)}...)...`);
-      await this.client.login(token);
+      await Promise.race([
+        this.client.login(token),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Gateway login connection timed out (10s)')), 10000)),
+      ]);
       this.logger.log(`Discord Gateway connected successfully! Tag: ${this.client.user?.tag}`);
 
       await this.registerSlashCommands();
     } catch (err: any) {
-      this.logger.error(`Failed to initialize Discord client: ${err.message}`, err.stack);
+      this.logger.warn(`Discord Gateway connection skipped or timed out: ${err.message}. Running in HTTP-interactions mode.`);
     }
   }
 
@@ -790,12 +793,13 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
             continue;
           }
 
-          const existing = await this.prisma.activity.findUnique({
+          const existing = await this.prisma.activity.findFirst({
             where: {
-              userId_leetCodeSubmissionId: {
-                userId: user.id,
-                leetCodeSubmissionId: sub.id,
-              },
+              userId: user.id,
+              OR: [
+                { leetCodeSubmissionId: sub.id },
+                { problemSlug: sub.titleSlug },
+              ],
             },
           });
           if (existing) continue;
@@ -1535,13 +1539,14 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     path: string,
     jsonStr: string,
     authHeader?: string,
+    retries = 2,
   ): Promise<boolean> {
     return new Promise((resolve) => {
       import('https').then((https) => {
         const headers: Record<string, string | number> = {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(jsonStr),
-          'User-Agent': 'DiscordBot (https://discord.js.org, 14.16.3)',
+          'User-Agent': 'DevGuildBot/1.0 (+https://devguild.onrender.com)',
           'Accept': 'application/json',
         };
         if (authHeader) {
@@ -1556,14 +1561,19 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
             method: 'POST',
             headers,
             family: 4,
-            timeout: 8000,
+            timeout: 10000,
           },
           (res: any) => {
             let data = '';
             res.on('data', (chunk: any) => (data += chunk));
-            res.on('end', () => {
+            res.on('end', async () => {
               if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
                 resolve(true);
+              } else if ((res.statusCode === 403 || res.statusCode === 429) && retries > 0) {
+                this.logger.warn(`HTTPS POST to ${hostname}${path} returned ${res.statusCode}. Retrying in 2.5s (remaining retries: ${retries - 1})...`);
+                await new Promise((r) => setTimeout(r, 2500));
+                const retryResult = await this.executeHttpsPost(hostname, path, jsonStr, authHeader, retries - 1);
+                resolve(retryResult);
               } else {
                 this.logger.warn(`HTTPS POST to ${hostname}${path} returned ${res.statusCode}: ${data}`);
                 resolve(false);
@@ -1685,7 +1695,29 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
    * 2. If client/Gateway is unavailable (e.g. Cloudflare 1015 on Render), uses Webhook delivery (proxied via lewisakura to bypass Cloudflare IP bans).
    * 3. Falls back to direct native HTTPS POST to Discord API.
    */
+  private channelMessageQueue: Promise<any> = Promise.resolve();
+
+  /**
+   * Sends a message to a Discord channel using a multi-tier fallback:
+   * 1. Discord Webhook via lewisakura proxy (FIRST - bypasses Cloudflare 1015 on Render shared IPs)
+   * 2. discord.js Gateway client (if connected)
+   * 3. Falls back to direct native HTTPS POST to Discord API.
+   *
+   * Queued sequentially with 1.2s spacing to prevent Cloudflare Turnstile bot challenge triggers.
+   */
   async sendMessageToChannel(
+    channelId: string,
+    payload: { content?: string; embeds?: any[]; allowed_mentions?: any },
+  ): Promise<boolean> {
+    const queuePromise = this.channelMessageQueue.then(async () => {
+      await new Promise((r) => setTimeout(r, 1200));
+      return this.dispatchMessageToChannel(channelId, payload);
+    });
+    this.channelMessageQueue = queuePromise.catch(() => false);
+    return queuePromise;
+  }
+
+  private async dispatchMessageToChannel(
     channelId: string,
     payload: { content?: string; embeds?: any[]; allowed_mentions?: any },
   ): Promise<boolean> {
