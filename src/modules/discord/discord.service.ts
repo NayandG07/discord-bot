@@ -1348,13 +1348,17 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
             const embed = DiscordEmbeds.createSolveAlertEmbed(user, event, event.xpAwarded, goalProgressSummary);
             const { mention, roleId } = await this.getDevRoleMention(membership.guild.discordGuildId);
 
-            await this.sendMessageToChannel(notifConfig.activityChannelId, {
+            const delivered = await this.sendMessageToChannel(notifConfig.activityChannelId, {
               content: `🔔 **Problem Solved Alert!** ${mention}`,
               embeds: [embed],
               allowed_mentions: roleId ? { roles: [roleId] } : { parse: ['roles'] },
             });
 
-            this.logger.log(`Broadcasted solve alert for ${user.username} to channel ${notifConfig.activityChannelId}`);
+            if (delivered) {
+              this.logger.log(`Broadcasted solve alert for ${user.username} to channel ${notifConfig.activityChannelId}`);
+            } else {
+              this.logger.warn(`Failed to broadcast solve alert for ${user.username} to channel ${notifConfig.activityChannelId}: all delivery strategies failed.`);
+            }
           } catch (channelErr: any) {
             this.logger.warn(`Could not send activity alert to channel ${notifConfig.activityChannelId}: ${channelErr.message}`);
           }
@@ -1512,7 +1516,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       parsedPath = webhookUrl;
     }
 
-    const proxyHost = this.config.get<string>('DISCORD_WEBHOOK_PROXY_HOST')?.trim();
+    const proxyHost = this.config.get<string>('DISCORD_WEBHOOK_PROXY_HOST')?.trim() || 'webhook.lewisakura.moe';
 
     if (proxyHost) {
       const proxySuccess = await this.executeHttpsPost(proxyHost, parsedPath, jsonStr);
@@ -1684,14 +1688,14 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   async sendMessageToChannel(
     channelId: string,
     payload: { content?: string; embeds?: any[]; allowed_mentions?: any },
-  ): Promise<void> {
+  ): Promise<boolean> {
     // 1. Try discord.js Gateway client if ready
     if (this.client?.isReady?.()) {
       try {
         const channel = await this.client.channels.fetch(channelId).catch(() => null);
         if (channel && channel.isTextBased()) {
           await (channel as any).send(payload);
-          return;
+          return true;
         }
       } catch (err: any) {
         this.logger.warn(`client.channels.send failed for ${channelId}: ${err.message}. Trying webhook / direct HTTP...`);
@@ -1702,7 +1706,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     const webhookUrl = await this.getWebhookUrlForChannel(channelId);
     if (webhookUrl) {
       const webhookSuccess = await this.sendWebhookMessage(webhookUrl, payload);
-      if (webhookSuccess) return;
+      if (webhookSuccess) return true;
     }
 
     // 3. Fallback to direct REST API
@@ -1714,6 +1718,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     };
     const jsonStr = JSON.stringify(jsonBody);
 
-    await this.executeHttpsPost('discord.com', `/api/v10/channels/${channelId}/messages`, jsonStr, `Bot ${token}`);
+    const restSuccess = await this.executeHttpsPost('discord.com', `/api/v10/channels/${channelId}/messages`, jsonStr, `Bot ${token}`);
+    return restSuccess;
   }
 }
