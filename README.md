@@ -17,8 +17,9 @@ Unlike simple scraping bots that measure raw question counters, DevGuild introdu
 
 The repository includes complete technical architectural specifications:
 
-1. [**Project Context & Philosophy**](docs/context.md) — Core vision, philosophy, and community operating model.
-2. [**Architecture Blueprint**](docs/architecture.md) — High-level system topology, decoupled worker vs bot architecture, security model, and resilience strategies.
+1. 🌟 [**Master Features & System Architecture Guide**](docs/FEATURES_AND_SYSTEM_GUIDE.md) — Complete guide covering all features, XP economy, RPG hierarchy, contest raids, slash commands, and resilience mechanisms.
+2. [**Project Context & Philosophy**](docs/context.md) — Core vision, philosophy, and community operating model.
+3. [**Architecture Blueprint**](docs/architecture.md) — High-level system topology, decoupled worker vs bot architecture, security model, and resilience strategies.
 3. [**Database Specification**](docs/database.md) — Complete data dictionary, 20+ models, foreign key relationships, composite indexes, and partitioning strategy.
 4. [**API Specification**](docs/api.md) — REST API specifications, Swagger OpenAPI models, DTOs, query parameters, and error envelopes.
 5. [**Discord UX Design**](docs/discord-ux.md) — Slash command hierarchy, interactive buttons, modal dialogs, rank color themes, and Canvas card specifications.
