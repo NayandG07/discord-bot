@@ -1843,7 +1843,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // 3. Last resort: direct discord.com REST API
+    // 3. Last resort: REST API — try CF proxy first, then direct discord.com
     const token = this.config.get<string>('DISCORD_BOT_TOKEN')?.trim().replace(/^["']|["']$/g, '') ?? '';
     const jsonBody = {
       content: payload.content,
@@ -1851,8 +1851,19 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       allowed_mentions: payload.allowed_mentions,
     };
     const jsonStr = JSON.stringify(jsonBody);
+    const restPath = `/api/v10/channels/${channelId}/messages`;
 
-    const restSuccess = await this.executeHttpsPost('discord.com', `/api/v10/channels/${channelId}/messages`, jsonStr, `Bot ${token}`);
+    const cfProxyHost = this.config.get<string>('DISCORD_WEBHOOK_PROXY_HOST')?.trim();
+    if (cfProxyHost) {
+      const proxyRestSuccess = await this.executeHttpsPost(cfProxyHost, restPath, jsonStr, `Bot ${token}`);
+      if (proxyRestSuccess) {
+        this.logger.log(`Message delivered to channel ${channelId} via CF proxy REST.`);
+        return true;
+      }
+      this.logger.warn(`CF proxy REST delivery failed for channel ${channelId}. Trying direct discord.com...`);
+    }
+
+    const restSuccess = await this.executeHttpsPost('discord.com', restPath, jsonStr, `Bot ${token}`);
     if (!restSuccess) {
       this.logger.error(`All delivery strategies exhausted for channel ${channelId}. Message was NOT sent.`);
     }
