@@ -22,6 +22,33 @@ export class GoalService {
   ) {}
 
   /**
+   * Calculates proportional XP penalty scaled to the user's current Guild XP:
+   * - DAY: 5% of current Guild XP (min 3 XP)
+   * - WEEK: 10% of current Guild XP (min 5 XP)
+   */
+  calculatePenaltyXp(period: GoalPeriod, currentGuildXp: number): number {
+    const config = GOAL_PENALTIES[period];
+    return Math.max(config.minXp, Math.round(Math.max(0, currentGuildXp) * config.xpRate));
+  }
+
+  private async getUserGuildXp(userId: string, guildId?: string | null): Promise<number> {
+    if (guildId && this.prisma.guildMember?.findUnique) {
+      const member = await this.prisma.guildMember.findUnique({
+        where: { guildId_userId: { guildId, userId } },
+      });
+      if (member) return Number(member.guildXp);
+    }
+    if (this.prisma.guildMember?.findFirst) {
+      const member = await this.prisma.guildMember.findFirst({
+        where: { userId },
+        orderBy: { guildXp: 'desc' },
+      });
+      if (member) return Number(member.guildXp);
+    }
+    return 0;
+  }
+
+  /**
    * Calculates the exact start and end boundaries for DAY and WEEK goals in UTC.
    */
   calculateGoalWindow(period: GoalPeriod, referenceDate: Date = new Date()): { startsAt: Date; endsAt: Date } {
@@ -134,6 +161,8 @@ export class GoalService {
       this.logger.log(`Created new ${period} goal for user ${discordUserId} with target ${targetCount}.`);
     }
 
+    const currentGuildXp = await this.getUserGuildXp(user.id, savedGoal.guildId);
+    const penaltyXp = this.calculatePenaltyXp(period, currentGuildXp);
     const penalties = GOAL_PENALTIES[period];
     return {
       id: savedGoal.id,
@@ -145,7 +174,7 @@ export class GoalService {
       status: savedGoal.status,
       startsAt: savedGoal.startsAt,
       endsAt: savedGoal.endsAt,
-      penaltyXp: penalties.xp,
+      penaltyXp,
       penaltyReliability: penalties.reliability,
     };
   }
@@ -173,6 +202,8 @@ export class GoalService {
     for (const goal of activeGoals) {
       const liveSolves = await this.countSolvesInWindow(user.id, goal.startsAt, goal.endsAt);
       const isComplete = liveSolves >= goal.targetCount;
+      const currentGuildXp = await this.getUserGuildXp(user.id, goal.guildId);
+      const penaltyXp = this.calculatePenaltyXp(goal.period, currentGuildXp);
       const penalties = GOAL_PENALTIES[goal.period];
 
       // Auto-update if progress changed
@@ -197,7 +228,7 @@ export class GoalService {
         status: isComplete ? GoalStatus.COMPLETED : GoalStatus.ACTIVE,
         startsAt: goal.startsAt,
         endsAt: goal.endsAt,
-        penaltyXp: penalties.xp,
+        penaltyXp,
         penaltyReliability: penalties.reliability,
       });
     }
@@ -340,6 +371,8 @@ export class GoalService {
       }
 
       if (isDue) {
+        const currentGuildXp = await this.getUserGuildXp(goal.userId, goal.guildId);
+        const penaltyXp = this.calculatePenaltyXp(goal.period, currentGuildXp);
         const penalties = GOAL_PENALTIES[goal.period];
         candidates.push({
           goalId: goal.id,
@@ -353,7 +386,7 @@ export class GoalService {
           currentCount: solves,
           remaining: goal.targetCount - solves,
           endsAt: goal.endsAt,
-          penaltyXp: penalties.xp,
+          penaltyXp,
           penaltyReliability: penalties.reliability,
         });
       }
@@ -414,12 +447,27 @@ export class GoalService {
         result.completedGoals++;
         this.logger.log(`Expired ${goal.period} goal for user ${goal.user.username} COMPLETED (${solves}/${goal.targetCount}). No bonuses.`);
       } else {
-        // Failed target -> PENALISE!
+        // Failed target -> PENALISE proportionally to current Guild XP!
         const penalties = GOAL_PENALTIES[goal.period];
-        const penaltyXp = penalties.xp;
         const penaltyReliability = penalties.reliability;
+        let penaltyXp = this.calculatePenaltyXp(goal.period, 0);
 
         await this.prisma.$transaction(async (tx) => {
+          let member: any = null;
+          if (goal.guildId) {
+            member = await tx.guildMember.findUnique({
+              where: { guildId_userId: { guildId: goal.guildId, userId: goal.userId } },
+            });
+          } else if (tx.guildMember?.findFirst) {
+            member = await tx.guildMember.findFirst({
+              where: { userId: goal.userId },
+              orderBy: { guildXp: 'desc' },
+            });
+          }
+
+          const currentXp = member ? Number(member.guildXp) : 0;
+          penaltyXp = this.calculatePenaltyXp(goal.period, currentXp);
+
           // 1. Mark goal as failed
           await tx.userGoal.update({
             where: { id: goal.id },
@@ -437,7 +485,7 @@ export class GoalService {
           await tx.xPTransactions.create({
             data: {
               userId: goal.userId,
-              guildId: goal.guildId,
+              guildId: goal.guildId ?? member?.guildId ?? null,
               source: XpSource.GOAL_PENALTY,
               baseAmount: -penaltyXp,
               multiplier: 1.0,
@@ -449,18 +497,12 @@ export class GoalService {
           });
 
           // 3. Deduct guild XP from member
-          if (goal.guildId) {
-            const member = await tx.guildMember.findUnique({
-              where: { guildId_userId: { guildId: goal.guildId, userId: goal.userId } },
+          if (member) {
+            const newXp = Math.max(0, currentXp - penaltyXp);
+            await tx.guildMember.update({
+              where: { id: member.id },
+              data: { guildXp: BigInt(newXp) },
             });
-            if (member) {
-              const currentXp = Number(member.guildXp);
-              const newXp = Math.max(0, currentXp - penaltyXp);
-              await tx.guildMember.update({
-                where: { id: member.id },
-                data: { guildXp: BigInt(newXp) },
-              });
-            }
           }
         });
 

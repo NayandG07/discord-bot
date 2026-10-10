@@ -2,11 +2,15 @@ import { GoalPeriod, GoalStatus } from '@prisma/client';
 
 export const GOAL_PENALTIES = {
   DAY: {
-    xp: 50,
+    xpRate: 0.05, // 5% of current Guild XP
+    minXp: 3,
+    xp: 50, // fallback reference
     reliability: 5.0,
   },
   WEEK: {
-    xp: 150,
+    xpRate: 0.10, // 10% of current Guild XP
+    minXp: 5,
+    xp: 150, // fallback reference
     reliability: 10.0,
   },
 };

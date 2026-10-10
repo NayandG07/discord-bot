@@ -425,9 +425,9 @@ export class DiscordEmbeds {
           `• **/goal status**: Check live progress, progress bars, deadlines, and penalties at risk.\n` +
           `• **/goal cancel**: Cancel an active goal.\n` +
           `• ⏰ **Automated Reminders**: Reminders are delivered to the activity channel, tagging **you only**.\n` +
-          `• ⚠️ **Accountability Clause**: Completing goals awards **NO bonuses** (discipline is its own reward). If you fail to hit your target before deadline, you are **PENALIZED**:\n` +
-          `  - Daily failure: **-50 XP** and **-5.0% Reliability**\n` +
-          `  - Weekly failure: **-150 XP** and **-10.0% Reliability**\n\n` +
+          `• ⚠️ **Accountability Clause**: Completing goals awards **NO bonuses** (discipline is its own reward). If you fail to hit your target before deadline, you are **PENALIZED** proportionally to your current Guild XP:\n` +
+          `  - Daily failure: **-5% of Guild XP** *(min 3 XP)* and **-5.0% Reliability**\n` +
+          `  - Weekly failure: **-10% of Guild XP** *(min 5 XP)* and **-10.0% Reliability**\n\n` +
           `📊 **8. Community Recaps & Digest**\n` +
           `• **/recap daily**: 24-hour guild solve recap and active coder list.\n` +
           `• **/recap weekly**: Past 7-day solve digest, top solvers, and difficulty breakdown.\n` +
@@ -440,6 +440,7 @@ export class DiscordEmbeds {
 
   static createGoalSetEmbed(goal: any): EmbedBuilder {
     const periodLabel = goal.period === 'DAY' ? 'Daily' : 'Weekly';
+    const pctLabel = goal.period === 'DAY' ? '5%' : '10%';
     const endUnix = Math.floor(new Date(goal.endsAt).getTime() / 1000);
     const isCompleted = goal.isComplete;
 
@@ -453,7 +454,7 @@ export class DiscordEmbeds {
           `• **Deadline**: <t:${endUnix}:F> (<t:${endUnix}:R>)\n\n` +
           `⚠️ **ACCOUNTABILITY CLAUSE (STRICT ENFORCEMENT)**:\n` +
           `• If you **fail** to hit your target before the deadline, you will be penalized:\n` +
-          `  - 📉 **-${goal.penaltyXp} Guild XP**\n` +
+          `  - 📉 **-${goal.penaltyXp} Guild XP** *(${pctLabel} of your current Guild XP)*\n` +
           `  - 📉 **-${Number(goal.penaltyReliability).toFixed(1)}% Reliability Score**\n` +
           `• **NO BONUSES**: Fulfilling this goal does NOT grant bonus XP or multipliers. This is for pure accountability and discipline.`,
       )

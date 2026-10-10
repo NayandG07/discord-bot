@@ -125,7 +125,7 @@ describe('GoalService', () => {
       expect(result.currentCount).toBe(1);
       expect(result.remaining).toBe(2);
       expect(result.status).toBe(GoalStatus.ACTIVE);
-      expect(result.penaltyXp).toBe(50);
+      expect(result.penaltyXp).toBe(3);
       expect(result.penaltyReliability).toBe(5.0);
     });
   });
@@ -172,7 +172,7 @@ describe('GoalService', () => {
       expect(prisma.xPTransactions.create).not.toHaveBeenCalled();
     });
 
-    it('enforces penalties when target is missed upon expiration (penalises XP and reliability)', async () => {
+    it('enforces proportional penalties when target is missed upon expiration (5% daily XP and reliability)', async () => {
       const expiredGoal = {
         id: 'goal-2',
         userId: 'user-1',
@@ -193,22 +193,22 @@ describe('GoalService', () => {
 
       expect(evalResult.failedGoals).toBe(1);
       expect(evalResult.penalties).toHaveLength(1);
-      expect(evalResult.penalties[0].penaltyXp).toBe(50);
+      expect(evalResult.penalties[0].penaltyXp).toBe(25); // 5% of 500 XP
       expect(evalResult.penalties[0].penaltyReliability).toBe(5.0);
 
       // Verify negative XP transaction
       expect(prisma.xPTransactions.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           source: XpSource.GOAL_PENALTY,
-          baseAmount: -50,
-          finalAmount: -50,
+          baseAmount: -25,
+          finalAmount: -25,
         }),
       });
 
       // Verify guild member XP deduction
       expect(prisma.guildMember.update).toHaveBeenCalledWith({
         where: { id: 'member-1' },
-        data: { guildXp: BigInt(450) },
+        data: { guildXp: BigInt(475) },
       });
 
       // Verify reliability deduction
