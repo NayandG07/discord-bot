@@ -493,7 +493,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       ? `/api/v10/webhooks/${appId}/${interactionToken}/messages/@original`
       : `/api/v10/webhooks/${appId}/${interactionToken}`;
 
-    const proxyHost = this.config.get<string>('DISCORD_WEBHOOK_PROXY_HOST')?.trim();
+    const proxyHost = this.getProxyHost();
 
     const sendToHost = (hostname: string): Promise<boolean> => {
       return new Promise(async (resolve) => {
@@ -545,8 +545,8 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     };
 
     return new Promise(async (resolve, reject) => {
-      // 1. Try proxy host if explicitly configured in environment
-      if (proxyHost) {
+      // 1. Try CF Worker proxy host for POST requests
+      if (proxyHost && method === 'POST') {
         const proxySuccess = await sendToHost(proxyHost);
         if (proxySuccess) return resolve();
       }
@@ -1563,7 +1563,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       parsedPath = webhookUrl;
     }
 
-    const proxyHost = this.config.get<string>('DISCORD_WEBHOOK_PROXY_HOST')?.trim() || 'webhook.lewisakura.moe';
+    const proxyHost = this.getProxyHost();
 
     if (proxyHost) {
       const proxySuccess = await this.executeHttpsPost(proxyHost, parsedPath, jsonStr);
@@ -1575,6 +1575,11 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     }
 
     return await this.executeHttpsPost('discord.com', parsedPath, jsonStr);
+  }
+
+  private getProxyHost(): string {
+    const raw = this.config.get<string>('DISCORD_WEBHOOK_PROXY_HOST')?.trim() || 'devguild-bot.codeventurers.workers.dev';
+    return raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
   }
 
   private executeHttpsPost(
@@ -1853,7 +1858,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     const jsonStr = JSON.stringify(jsonBody);
     const restPath = `/api/v10/channels/${channelId}/messages`;
 
-    const cfProxyHost = this.config.get<string>('DISCORD_WEBHOOK_PROXY_HOST')?.trim();
+    const cfProxyHost = this.getProxyHost();
     if (cfProxyHost) {
       const proxyRestSuccess = await this.executeHttpsPost(cfProxyHost, restPath, jsonStr, `Bot ${token}`);
       if (proxyRestSuccess) {
