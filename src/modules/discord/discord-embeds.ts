@@ -96,25 +96,52 @@ export class DiscordEmbeds {
   }
 
   static createBossBattleEmbed(boss: any): EmbedBuilder {
-    const healthPercent = Math.round((boss.currentHealthPoints / boss.totalHealthPoints) * 100);
+    const healthPercent = Math.max(0, Math.round((boss.currentHealthPoints / boss.totalHealthPoints) * 100));
     const barLength = 20;
     const filled = Math.round((healthPercent / 100) * barLength);
     const healthBar = '█'.repeat(Math.max(0, filled)) + '░'.repeat(Math.max(0, barLength - filled));
 
-    return new EmbedBuilder()
+    const endUnix = boss.contest ? Math.floor(new Date(boss.contest.endTime).getTime() / 1000) : 0;
+    const startMs = boss.contest ? new Date(boss.contest.startTime).getTime() : 0;
+    const isCritActive = Date.now() < startMs + 30 * 60 * 1000;
+
+    const embed = new EmbedBuilder()
       .setTitle(`👹 RAID EVENT: ${boss.bossName.toUpperCase()}`)
       .setColor(0xe040fb)
       .setDescription(
-        `**Official LeetCode Contest Raid**\n\n` +
+        `**Official LeetCode ${boss.contest?.title || 'Contest'} Raid**\n\n` +
+          `⏱️ **Raid Status**: 🔴 **LIVE IN SESSION** (Ends <t:${endUnix}:R>)\n` +
+          (isCritActive
+            ? `⚡ **CRITICAL STRIKE WINDOW ACTIVE**: Solves right now deal **+25% Critical Damage**!\n\n`
+            : `⚡ **Standard Strike Phase**: Raid currently underway!\n\n`) +
           `Boss Health: **${boss.currentHealthPoints.toLocaleString()} / ${boss.totalHealthPoints.toLocaleString()} HP** (${healthPercent}%)\n` +
           `\`[${healthBar}]\`\n\n` +
-          `⚔️ **Damage Formula**:\n` +
-          `• Q1: 100 DMG  |  Q2: 250 DMG\n` +
-          `• Q3: 600 DMG  |  Q4: 1,500 DMG\n\n` +
-          `Solve contest questions to defeat the boss and earn Guild XP & Boss Slayer badges!`,
-      )
-      .setFooter({ text: 'DevGuild Raid Boss Engine' })
-      .setTimestamp();
+          `⚔️ **Damage Formula per Solve**:\n` +
+          `• **Q1 (Easy)**: 💥 **100 DMG** (+10 XP)\n` +
+          `• **Q2 (Medium)**: 💥 **250 DMG** (+30 XP)\n` +
+          `• **Q3 (Medium/Hard)**: 💥 **600 DMG** (+75 XP)\n` +
+          `• **Q4 (Hard)**: 💥 **1,500 DMG** (+150 XP)\n\n` +
+          `Solve problems on LeetCode and run \`/sync\` to deal damage to the Boss! Defeating the boss awards Guild XP bonuses and the **Boss Slayer** badge!\n\n` +
+          `*Check past raid damage with \`/leaderboard contests\`.*`,
+      );
+
+    if (boss.participants && boss.participants.length > 0) {
+      const sorted = [...boss.participants].sort((a: any, b: any) => b.damageDealt - a.damageDealt);
+      const topList = sorted
+        .slice(0, 5)
+        .map((p: any, idx: number) => {
+          const medal = idx === 0 ? '👑 MVP' : `#${idx + 1}`;
+          return `${medal} **${p.user?.username || 'Coder'}**: 💥 **${p.damageDealt.toLocaleString()} DMG** (${p.problemsSolved} solves)`;
+        })
+        .join('\n');
+      embed.addFields({ name: `🛡️ Raid Party Leaderboard (${boss.participants.length} Active)`, value: topList });
+    } else {
+      embed.addFields({ name: '🛡️ Raid Party', value: 'No damage dealt yet! Be the first to strike the boss with `/sync`.' });
+    }
+
+    embed.setFooter({ text: 'DevGuild Boss Battle Engine • Automated Raid Alerts' });
+    embed.setTimestamp();
+    return embed;
   }
 
   static renderProgressBar(current: number, total: number, length: number = 10): string {
@@ -292,25 +319,33 @@ export class DiscordEmbeds {
     return embed;
   }
 
-  static createUpcomingContestsEmbed(): EmbedBuilder {
-    const now = new Date();
+  static createUpcomingContestsEmbed(scheduleInfo?: any): EmbedBuilder {
+    let weeklyUnix: number;
+    let biweeklyUnix: number;
 
-    // Next Weekly Contest: Sunday at 02:30 UTC
-    const nextWeekly = new Date(now);
-    const daysUntilSunday = (7 - now.getUTCDay()) % 7;
-    const isSundayPastContest = daysUntilSunday === 0 && (now.getUTCHours() > 4 || (now.getUTCHours() === 4 && now.getUTCMinutes() > 0));
-    nextWeekly.setUTCDate(now.getUTCDate() + (isSundayPastContest ? 7 : daysUntilSunday));
-    nextWeekly.setUTCHours(2, 30, 0, 0);
+    if (scheduleInfo?.upcomingBiweekly && scheduleInfo?.upcomingWeekly) {
+      biweeklyUnix = Math.floor(new Date(scheduleInfo.upcomingBiweekly.start).getTime() / 1000);
+      weeklyUnix = Math.floor(new Date(scheduleInfo.upcomingWeekly.start).getTime() / 1000);
+    } else {
+      const now = new Date();
+      const refBiweekly = new Date('2024-10-12T14:30:00Z').getTime();
+      const twoWeeks = 14 * 24 * 60 * 60 * 1000;
+      const bDiff = now.getTime() - refBiweekly;
+      const bCycle = Math.floor(bDiff / twoWeeks);
+      const curBStart = new Date(refBiweekly + bCycle * twoWeeks);
+      const nextBStart = new Date(refBiweekly + (bCycle + 1) * twoWeeks);
+      const upcomingB = now < curBStart ? curBStart : nextBStart;
+      biweeklyUnix = Math.floor(upcomingB.getTime() / 1000);
 
-    // Next Biweekly Contest: Alternate Saturday at 14:30 UTC
-    const refBiweekly = new Date('2024-10-12T14:30:00Z').getTime();
-    const twoWeeks = 14 * 24 * 60 * 60 * 1000;
-    const diff = now.getTime() - refBiweekly;
-    const remainder = diff % twoWeeks;
-    const nextBiweekly = new Date(now.getTime() + (twoWeeks - remainder));
-
-    const weeklyUnix = Math.floor(nextWeekly.getTime() / 1000);
-    const biweeklyUnix = Math.floor(nextBiweekly.getTime() / 1000);
+      const refWeekly = new Date('2024-10-13T02:30:00Z').getTime();
+      const oneWeek = 7 * 24 * 60 * 60 * 1000;
+      const wDiff = now.getTime() - refWeekly;
+      const wCycle = Math.floor(wDiff / oneWeek);
+      const curWStart = new Date(refWeekly + wCycle * oneWeek);
+      const nextWStart = new Date(refWeekly + (wCycle + 1) * oneWeek);
+      const upcomingW = now < curWStart ? curWStart : nextWStart;
+      weeklyUnix = Math.floor(upcomingW.getTime() / 1000);
+    }
 
     return new EmbedBuilder()
       .setTitle('⚔️ LEETCODE RAID BOSS RADAR & CONTEST SCHEDULE')

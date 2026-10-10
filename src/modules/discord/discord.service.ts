@@ -23,6 +23,7 @@ import { SLASH_COMMANDS } from './discord.commands';
 import { ActivityCreatedEventPayload } from '../activity/activity.types';
 import { LeaderboardService } from '../leaderboards/leaderboard.service';
 import { GoalService } from '../goals/goal.service';
+import { ContestService } from '../contests/contest.service';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -34,6 +35,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   private client: Client;
   private devRoleCache = new Map<string, string>();
   private goalCheckInterval?: NodeJS.Timeout;
+  private contestCheckInterval?: NodeJS.Timeout;
 
   constructor(
     private readonly config: ConfigService,
@@ -44,6 +46,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     private readonly activity: ActivityService,
     private readonly leaderboard?: LeaderboardService,
     private readonly goalService?: GoalService,
+    private readonly contestService?: ContestService,
   ) {
     this.client = new Client({
       intents: [GatewayIntentBits.Guilds],
@@ -77,6 +80,15 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         this.logger.error(`Error in goal accountability background runner: ${err.message}`);
       }
     }, 10 * 60 * 1000); // Check every 10 minutes
+
+    // Start background contest & raid boss monitor (checks every 2 minutes)
+    this.contestCheckInterval = setInterval(async () => {
+      try {
+        await this.processContestRaidMonitor();
+      } catch (err: any) {
+        this.logger.error(`Error in contest raid monitor: ${err.message}`);
+      }
+    }, 2 * 60 * 1000);
   }
 
   private async initDiscord(token: string) {
@@ -100,6 +112,9 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy() {
     if (this.goalCheckInterval) {
       clearInterval(this.goalCheckInterval);
+    }
+    if (this.contestCheckInterval) {
+      clearInterval(this.contestCheckInterval);
     }
     if (this.client) {
       this.logger.log('Destroying Discord client connection...');
@@ -1078,14 +1093,21 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      const activeBoss = await this.prisma.bossBattle.findFirst({
-        where: { guildId: guild.id, isDefeated: false },
-        include: { contest: true },
-        orderBy: { createdAt: 'desc' },
-      });
+      let activeBoss = this.contestService
+        ? await this.contestService.ensureActiveBossBattle(guild.id)
+        : null;
 
       if (!activeBoss) {
-        const embed = DiscordEmbeds.createUpcomingContestsEmbed();
+        activeBoss = await this.prisma.bossBattle.findFirst({
+          where: { guildId: guild.id, isDefeated: false },
+          include: { contest: true, participants: { include: { user: true } } },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
+
+      if (!activeBoss) {
+        const scheduleInfo = this.contestService?.getContestSchedule();
+        const embed = DiscordEmbeds.createUpcomingContestsEmbed(scheduleInfo);
         await interaction.editReply({ embeds: [embed] });
         return;
       }
@@ -1342,6 +1364,27 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
           }
         } catch (gErr: any) {
           this.logger.warn(`Could not fetch goal progress for alert: ${gErr.message}`);
+        }
+      }
+
+      // Check if submission falls in active contest and record boss raid damage
+      if (this.contestService) {
+        for (const membership of user.guildMemberships) {
+          try {
+            const raidResult = await this.contestService.recordRaidDamage(
+              user.id,
+              membership.guildId,
+              event.difficulty,
+              new Date(event.submissionTimestamp || Date.now()),
+            );
+            if (raidResult) {
+              this.logger.log(
+                `Contest raid strike: ${user.username} dealt ${raidResult.damageDealt} DMG to ${raidResult.bossBattle.bossName}`,
+              );
+            }
+          } catch (rErr: any) {
+            this.logger.warn(`Failed to record contest raid damage: ${rErr.message}`);
+          }
         }
       }
 
@@ -1654,6 +1697,57 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (err: any) {
       this.logger.error(`Error in processGoalEvaluations: ${err.message}`);
+    }
+  }
+
+  /**
+   * Monitors active contests and manages raid boss spawns / finalizations.
+   * Dispatches automated alerts to the guild's boss battle or activity channel when a raid begins.
+   */
+  async processContestRaidMonitor(): Promise<void> {
+    if (!this.contestService) return;
+    try {
+      const now = new Date();
+      const { activeContest } = this.contestService.getContestSchedule(now);
+
+      if (activeContest) {
+        const activeGuilds = await this.prisma.guild.findMany({
+          where: { isActive: true },
+          include: { notificationConfig: true },
+        });
+
+        for (const guild of activeGuilds) {
+          const existing = await this.prisma.bossBattle.findFirst({
+            where: {
+              guildId: guild.id,
+              contest: { leetCodeContestId: activeContest.leetCodeContestId },
+            },
+          });
+
+          if (!existing) {
+            const boss = await this.contestService.ensureActiveBossBattle(guild.id, now);
+            if (boss && guild.notificationConfig?.enableBossAlerts) {
+              const targetChannelId =
+                guild.notificationConfig.bossBattleChannelId || guild.notificationConfig.activityChannelId;
+              if (targetChannelId) {
+                const { mention, roleId } = await this.getDevRoleMention(guild.discordGuildId);
+                const embed = DiscordEmbeds.createBossBattleEmbed(boss);
+                await this.sendMessageToChannel(targetChannelId, {
+                  content: `🚨 **OFFICIAL LEETCODE RAID BOSS HAS SPAWNED!** ${mention}`.trim(),
+                  embeds: [embed],
+                  allowed_mentions: roleId ? { roles: [roleId] } : { parse: ['roles'] },
+                });
+                this.logger.log(`Broadcasted Raid Boss Spawn Alert for ${boss.bossName} in guild ${guild.id}`);
+              }
+            }
+          }
+        }
+      }
+
+      // Check and finalize any expired contests
+      await this.contestService.checkAndFinalizeExpiredBossBattles(now);
+    } catch (err: any) {
+      this.logger.error(`Error in processContestRaidMonitor: ${err.message}`);
     }
   }
 
