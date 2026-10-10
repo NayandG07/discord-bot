@@ -1333,9 +1333,10 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
   @OnEvent('activity.created')
   async handleActivityBroadcast(event: ActivityCreatedEventPayload) {
     try {
-      // 1. Guard against historical submissions: only broadcast solve alerts for problems solved within the last 24 hours
-      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      if (event.submissionTimestamp && new Date(event.submissionTimestamp).getTime() < oneDayAgo.getTime()) {
+      // Guard against historical submissions: only broadcast solve alerts for problems solved within the last 48 hours
+      // (48h instead of 24h to handle LeetCode's post-contest propagation delay of 30-90+ minutes)
+      const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+      if (event.submissionTimestamp && new Date(event.submissionTimestamp).getTime() < twoDaysAgo.getTime()) {
         this.logger.log(
           `Skipping live activity broadcast for historical submission '${event.problemTitle}' (${new Date(event.submissionTimestamp).toISOString()}).`,
         );

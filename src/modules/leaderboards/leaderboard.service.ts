@@ -147,11 +147,21 @@ export class LeaderboardService {
           },
         },
       },
-      orderBy: { user: { reliabilityScore: 'desc' } },
-      take: limit,
+      take: limit * 3, // over-fetch so we can re-sort in memory with tiebreakers
     });
 
-    return members.map((m, index) => {
+    // Sort: reliabilityScore DESC → currentStreak DESC → totalActivities DESC
+    members.sort((a, b) => {
+      const rDiff = Number(b.user.reliabilityScore) - Number(a.user.reliabilityScore);
+      if (rDiff !== 0) return rDiff;
+      const sDiff = b.user.currentStreak - a.user.currentStreak;
+      if (sDiff !== 0) return sDiff;
+      return (b.user._count?.activities ?? 0) - (a.user._count?.activities ?? 0);
+    });
+
+    const top = members.slice(0, limit);
+
+    return top.map((m, index) => {
       const profile = m.user.leetCodeProfile;
       return {
         rank: index + 1,
