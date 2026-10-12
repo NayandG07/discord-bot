@@ -20,6 +20,7 @@ import { DiscordModule } from './modules/discord/discord.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { HealthModule } from './modules/health/health.module';
 import { GoalModule } from './modules/goals/goal.module';
+import { LootModule } from './modules/loot/loot.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { GoalModule } from './modules/goals/goal.module';
     AdminModule,
     HealthModule,
     GoalModule,
+    LootModule,
   ],
 })
 export class AppModule {}

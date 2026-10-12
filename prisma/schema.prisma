@@ -190,6 +190,7 @@ model User {
   seasonSnapshots          SeasonLeaderboardSnapshot[]
   recaps                   Recap[]
   goals                    UserGoal[]
+  lootDrops                UserLootDrop[]
 
   @@index([discordId])
   @@index([lastActiveAt])
@@ -684,3 +685,25 @@ model UserGoal {
   @@index([guildId, status])
   @@map("user_goals")
 }
+
+model UserLootDrop {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  itemCode   String   @db.VarChar(64)
+  itemName   String   @db.VarChar(128)
+  category   String   @db.VarChar(32)
+  rarity     String   @db.VarChar(32)
+  source     String   @db.VarChar(64)
+  count      Int      @default(1)
+  isEquipped Boolean  @default(false)
+  obtainedAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(6)
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, itemCode])
+  @@index([userId, rarity])
+  @@map("user_loot_drops")
+}
+

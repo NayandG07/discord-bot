@@ -178,4 +178,26 @@ export const SLASH_COMMANDS = [
             ),
         ),
     ),
+
+  new SlashCommandBuilder()
+    .setName('inventory')
+    .setDescription('View your DevGuild Armory, Companion Zoo, and Ancient Relics collection')
+    .addUserOption((opt) => opt.setName('user').setDescription('Target user to view (defaults to you)'))
+    .addStringOption((opt) =>
+      opt
+        .setName('category')
+        .setDescription('Filter by collectible category')
+        .setRequired(false)
+        .addChoices(
+          { name: '🎒 All Collectibles', value: 'ALL' },
+          { name: '⚔️ Algorithmic Weapons (Armory)', value: 'WEAPON' },
+          { name: '🐾 Code Companions (Zoo)', value: 'COMPANION' },
+          { name: '🔮 Ancient Relics & Artifacts', value: 'RELIC' },
+        ),
+    ),
+
+  new SlashCommandBuilder()
+    .setName('drop')
+    .setDescription('Claim and unbox a Loot Crate (bonus crates earned from solves, goals, streaks & raids)'),
 ];
+

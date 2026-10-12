@@ -157,6 +157,7 @@ export class DiscordEmbeds {
     activity: any,
     xpAwarded?: number,
     goalProgress?: { current: number; target: number; period: string },
+    lootDrop?: any,
   ): EmbedBuilder {
     const diffEmoji = activity.difficulty === 'HARD' ? '🟥' : activity.difficulty === 'MEDIUM' ? '🟨' : '🟩';
     const color = activity.difficulty === 'HARD' ? 0xff1744 : activity.difficulty === 'MEDIUM' ? 0xffd700 : 0x00e676;
@@ -190,7 +191,22 @@ export class DiscordEmbeds {
       });
     }
 
-    if (user.avatarUrl) {
+    if (lootDrop) {
+      const statusBadge = lootDrop.isNewUnlock
+        ? '✨ **NEW UNLOCK!**'
+        : `🔼 **ASCENDED! (×${lootDrop.newCount})**`;
+      embed.addFields({
+        name: `${lootDrop.crateEmoji} ${lootDrop.crateName.toUpperCase()} UNBOXED!`,
+        value:
+          `${lootDrop.item.iconEmoji} **${lootDrop.item.name}** — \`[${lootDrop.rarityConfig.badge}]\`\n` +
+          `└ ${statusBadge} • \`${lootDrop.starDisplay}\` • **${lootDrop.item.passiveStat}**\n` +
+          `└ *"${lootDrop.item.lore}"*`,
+        inline: false,
+      });
+      if (lootDrop.item.iconUrl) {
+        embed.setThumbnail(lootDrop.item.iconUrl);
+      }
+    } else if (user.avatarUrl) {
       embed.setThumbnail(user.avatarUrl);
     }
 
@@ -425,13 +441,16 @@ export class DiscordEmbeds {
           `• **/goal status**: Check live progress, progress bars, deadlines, and penalties at risk.\n` +
           `• **/goal cancel**: Cancel an active goal.\n` +
           `• ⏰ **Automated Reminders**: Reminders are delivered to the activity channel, tagging **you only**.\n` +
-          `• ⚠️ **Accountability Clause**: Completing goals awards **NO bonuses** (discipline is its own reward). If you fail to hit your target before deadline, you are **PENALIZED** proportionally to your current Guild XP:\n` +
+          `• ⚠️ **Accountability Clause**: Failing a goal enforces proportional penalties:\n` +
           `  - Daily failure: **-5% of Guild XP** *(min 3 XP)* and **-5.0% Reliability**\n` +
-          `  - Weekly failure: **-10% of Guild XP** *(min 5 XP)* and **-10.0% Reliability**\n\n` +
-          `📊 **8. Community Recaps & Digest**\n` +
-          `• **/recap daily**: 24-hour guild solve recap and active coder list.\n` +
-          `• **/recap weekly**: Past 7-day solve digest, top solvers, and difficulty breakdown.\n` +
-          `• **/recap wrapped**: Generate your personal Monthly Wrapped graphic card!\n\n` +
+          `  - Weekly failure: **-10% of Guild XP** *(min 5 XP)* and **-10.0% Reliability**\n` +
+          `  - 🎁 Completing a Daily or Weekly goal drops a **Guaranteed Loot Crate**!\n\n` +
+          `🎁 **8. Loot Drops, Armory & Companion Zoo**\n` +
+          `• **/inventory**: View your unlocked **Algorithmic Weapons**, **Code Companions (Zoo)**, **Ancient Relics**, star ascensions (\`★★★★★\`), and **Total Armory Power**.\n` +
+          `• **/drop**: Unbox your daily supply crate or inspect rarity drop rates (\`⚪ Common\` → \`🔴 Mythic\`).\n` +
+          `• **How to Earn Drops**: First solve of the day, completing Daily/Weekly Goals, Streak Milestones, Hard solves, and Boss Raid strikes!\n\n` +
+          `📊 **9. Community Recaps & Digest**\n` +
+          `• **/recap daily / weekly / wrapped**: 24h & 7d digests + Monthly Wrapped graphic card!\n` +
           `• 🔔 The **@DEV** role is tagged automatically on solves and digest recaps!`,
       )
       .setFooter({ text: 'DevGuild • Consistency Over Intensity • Happy Coding! 💻' })
@@ -452,11 +471,12 @@ export class DiscordEmbeds {
           `• **Current Progress**: **${goal.currentCount}/${goal.targetCount}** solved\n` +
           `• **Remaining Needed**: **${goal.remaining}** problem${goal.remaining === 1 ? '' : 's'}\n` +
           `• **Deadline**: <t:${endUnix}:F> (<t:${endUnix}:R>)\n\n` +
+          `🎁 **GOAL COMPLETION REWARD**:\n` +
+          `• Hit your target to unbox a guaranteed **${goal.period === 'DAY' ? '🎯 Daily Accountability Chest' : '🏛️ Weekly Sovereign Vault'}** collectible!\n\n` +
           `⚠️ **ACCOUNTABILITY CLAUSE (STRICT ENFORCEMENT)**:\n` +
           `• If you **fail** to hit your target before the deadline, you will be penalized:\n` +
           `  - 📉 **-${goal.penaltyXp} Guild XP** *(${pctLabel} of your current Guild XP)*\n` +
-          `  - 📉 **-${Number(goal.penaltyReliability).toFixed(1)}% Reliability Score**\n` +
-          `• **NO BONUSES**: Fulfilling this goal does NOT grant bonus XP or multipliers. This is for pure accountability and discipline.`,
+          `  - 📉 **-${Number(goal.penaltyReliability).toFixed(1)}% Reliability Score**`,
       )
       .setFooter({ text: 'DevGuild Accountability Engine • Automated Reminder Alerts Enabled' })
       .setTimestamp();
@@ -491,9 +511,8 @@ export class DiscordEmbeds {
     });
 
     embed.setDescription(
-      `Here is your live goal status. Hit your targets before the deadline to protect your XP and Reliability!\n\n` +
-        goalDescriptions.join('\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n') +
-        `\n\n*Note: Goals yield no bonuses upon completion. Failing a goal enforces penalties immediately.*`,
+      `Here is your live goal status. Hit your targets before the deadline to unbox your Loot Crate and protect your XP!\n\n` +
+        goalDescriptions.join('\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n'),
     );
 
     return embed;
@@ -542,4 +561,111 @@ export class DiscordEmbeds {
       .setFooter({ text: 'DevGuild Accountability Engine' })
       .setTimestamp();
   }
+
+  static createLootDropEmbed(username: string, drop: any): EmbedBuilder {
+    const catLabel =
+      drop.item.category === 'WEAPON'
+        ? '⚔️ Algorithmic Weapon'
+        : drop.item.category === 'COMPANION'
+          ? '🐾 Code Companion (Zoo)'
+          : '🔮 Ancient Relic';
+
+    const statusLine = drop.isNewUnlock
+      ? `✨ **NEW COLLECTIBLE UNLOCKED!**`
+      : `🔼 **DUPLICATE ASCENSION!** *(Owned: ×${drop.newCount} → \`${drop.starDisplay}\`)*`;
+
+    const embed = new EmbedBuilder()
+      .setTitle(`${drop.crateEmoji} ${drop.crateName.toUpperCase()} UNBOXED!`)
+      .setColor(drop.rarityConfig.color)
+      .setThumbnail(drop.item.iconUrl)
+      .setDescription(
+        `**${username}** opened a **${drop.crateName}**!\n` +
+          `• **Trigger**: ${drop.reasonLabel}\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `### ${drop.item.iconEmoji} **${drop.item.name}**\n` +
+          `${statusLine}\n\n` +
+          `• **Rarity**: **${drop.rarityConfig.badge}**\n` +
+          `• **Category**: **${catLabel}**\n` +
+          `• **Star Tier**: \`${drop.starDisplay}\` *(Power: **⚡ ${drop.itemPower.toLocaleString()}**)*\n` +
+          `• **Passive Effect**: **${drop.item.passiveStat}**\n\n` +
+          `*"${drop.item.lore}"*`,
+      )
+      .setFooter({ text: 'DevGuild Loot & Armory Engine • View collection with /inventory' })
+      .setTimestamp();
+
+    return embed;
+  }
+
+  static createInventoryEmbed(inv: any, categoryFilter?: string): EmbedBuilder {
+    const progressBar = DiscordEmbeds.renderProgressBar(inv.uniqueUnlocked, inv.totalCatalogSize, 12);
+    const completionPct = Math.round((inv.uniqueUnlocked / Math.max(1, inv.totalCatalogSize)) * 100);
+
+    const topItem = inv.items[0];
+    const embedColor = topItem ? topItem.rarityConfig.color : 0x5865f2;
+    const thumbnail = topItem?.item?.iconUrl || inv.avatarUrl || null;
+
+    const embed = new EmbedBuilder()
+      .setTitle(`🎒 DEVGUILD ARMORY & COMPANION ZOO — ${inv.username}`)
+      .setColor(embedColor)
+      .setFooter({ text: 'DevGuild Collectible Vault • Earn crates from Solves, Goals, Streaks & Raids!' })
+      .setTimestamp();
+
+    if (thumbnail) {
+      embed.setThumbnail(thumbnail);
+    }
+
+    const r = inv.rarityCounts;
+    const headerDesc =
+      `⚡ **Total Armory Power**: **${inv.totalPower.toLocaleString()} PWR**  |  📦 **Total Unboxed**: **${inv.totalItemsCollected}**\n` +
+      `📚 **Collection Dex**: \`[${progressBar}]\` **${inv.uniqueUnlocked}/${inv.totalCatalogSize}** (${completionPct}%)\n` +
+      `🔴 Mythic: **${r.MYTHIC || 0}** · 🟠 Legendary: **${r.LEGENDARY || 0}** · 🟣 Epic: **${r.EPIC || 0}** · 🔵 Rare: **${r.RARE || 0}** · 🟢 Uncommon: **${r.UNCOMMON || 0}** · ⚪ Common: **${r.COMMON || 0}**`;
+
+    if (inv.items.length === 0) {
+      embed.setDescription(
+        `${headerDesc}\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `*Your armory is currently empty! Solve problems, complete \`/goal\` targets, or run \`/drop\` to claim your first Loot Crate!*`,
+      );
+      return embed;
+    }
+
+    embed.setDescription(headerDesc);
+
+    const renderGroup = (cat: string) => {
+      const group = inv.items.filter((x: any) => x.item.category === cat);
+      if (group.length === 0) return null;
+      return group
+        .slice(0, 8)
+        .map(
+          (entry: any) =>
+            `${entry.item.iconEmoji} **${entry.item.name}** \`[${entry.rarityConfig.badge}]\` \`${entry.starDisplay}\` *(×${entry.count})*\n` +
+            `└ ⚡ **${entry.power} PWR** • *${entry.item.passiveStat.split('•')[1]?.trim() || entry.item.passiveStat}*`,
+        )
+        .join('\n');
+    };
+
+    if (!categoryFilter || categoryFilter === 'WEAPON') {
+      const weaponsText = renderGroup('WEAPON');
+      if (weaponsText) {
+        embed.addFields({ name: '⚔️ ALGORITHMIC WEAPONS (ARMORY)', value: weaponsText, inline: false });
+      }
+    }
+
+    if (!categoryFilter || categoryFilter === 'COMPANION') {
+      const petsText = renderGroup('COMPANION');
+      if (petsText) {
+        embed.addFields({ name: '🐾 CODE COMPANIONS (ZOO)', value: petsText, inline: false });
+      }
+    }
+
+    if (!categoryFilter || categoryFilter === 'RELIC') {
+      const relicsText = renderGroup('RELIC');
+      if (relicsText) {
+        embed.addFields({ name: '🔮 ANCIENT RELICS & ARTIFACTS', value: relicsText, inline: false });
+      }
+    }
+
+    return embed;
+  }
 }
+
