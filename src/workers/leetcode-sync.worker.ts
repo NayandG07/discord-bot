@@ -37,7 +37,7 @@ export function createLeetCodeSyncWorker(
         for (const profile of verifiedProfiles) {
           try {
             const submissions = await leetcode.fetchRecentSubmissions(profile.username, 15);
-            const accepted = submissions.filter((s) => s.statusDisplay === 'Accepted');
+            const accepted = submissions.filter((s) => s.statusDisplay === 'Accepted').reverse();
 
             for (const sub of accepted) {
               const subTimestamp = new Date(Number(sub.timestamp) * 1000);

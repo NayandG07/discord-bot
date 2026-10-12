@@ -57,16 +57,21 @@ export class ActivityService {
   calculateUpdatedStreak(lastActiveAt: Date | null, currentStreak: number, submissionDate: Date): number {
     if (!lastActiveAt) return 1;
 
-    const startOfSub = new Date(submissionDate);
-    startOfSub.setHours(0, 0, 0, 0);
+    const startOfSub = Date.UTC(
+      submissionDate.getUTCFullYear(),
+      submissionDate.getUTCMonth(),
+      submissionDate.getUTCDate(),
+    );
+    const startOfLast = Date.UTC(
+      lastActiveAt.getUTCFullYear(),
+      lastActiveAt.getUTCMonth(),
+      lastActiveAt.getUTCDate(),
+    );
 
-    const startOfLast = new Date(lastActiveAt);
-    startOfLast.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((startOfSub - startOfLast) / (1000 * 60 * 60 * 24));
 
-    const diffDays = Math.round((startOfSub.getTime() - startOfLast.getTime()) / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 0) {
-      // Solved same calendar day
+    if (diffDays <= 0) {
+      // Solved same calendar day OR out-of-order delayed submission (e.g. contest solve un-hidden 24h later)
       return currentStreak > 0 ? currentStreak : 1;
     } else if (diffDays === 1) {
       // Solved consecutive day
@@ -141,12 +146,17 @@ export class ActivityService {
         },
       });
 
+      const latestActiveAt =
+        !user.lastActiveAt || dto.submissionTimestamp > user.lastActiveAt
+          ? dto.submissionTimestamp
+          : user.lastActiveAt;
+
       await tx.user.update({
         where: { id: dto.userId },
         data: {
           currentStreak: updatedStreak,
           longestStreak: newLongestStreak,
-          lastActiveAt: dto.submissionTimestamp,
+          lastActiveAt: latestActiveAt,
         },
       });
 

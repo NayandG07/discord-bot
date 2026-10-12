@@ -196,11 +196,10 @@ export class ContestService {
     submissionTimestamp: Date = new Date(),
   ) {
     // Check if the submission timestamp falls within a real contest window.
-    // We use the submission timestamp (not `now`) to handle LeetCode's propagation delay
-    // (contest results may appear 30-60 min after the contest ends).
-    // However, we cap the look-back to 4 hours to avoid counting day-old solves.
-    const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
-    if (submissionTimestamp < fourHoursAgo) return null;
+    // LeetCode hides contest submissions in recentSubmissionList for ~24-36h after the contest ends,
+    // so we allow up to 48 hours look-back while strictly verifying submissionTimestamp was inside the 90m contest window.
+    const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    if (submissionTimestamp < fortyEightHoursAgo) return null;
 
     const { activeContest } = this.getContestSchedule(submissionTimestamp);
     if (!activeContest) return null;
