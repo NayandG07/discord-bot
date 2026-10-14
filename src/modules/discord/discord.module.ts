@@ -9,10 +9,9 @@ import { ActivityModule } from '../activity/activity.module';
 import { LeaderboardModule } from '../leaderboards/leaderboard.module';
 import { GoalModule } from '../goals/goal.module';
 import { ContestModule } from '../contests/contest.module';
-import { LootModule } from '../loot/loot.module';
 
 @Module({
-  imports: [ConfigModule, LeetCodeModule, ReliabilityModule, RecapModule, ActivityModule, LeaderboardModule, GoalModule, ContestModule, LootModule],
+  imports: [ConfigModule, LeetCodeModule, ReliabilityModule, RecapModule, ActivityModule, LeaderboardModule, GoalModule, ContestModule],
   controllers: [DiscordInteractionsController],
   providers: [DiscordService],
   exports: [DiscordService],

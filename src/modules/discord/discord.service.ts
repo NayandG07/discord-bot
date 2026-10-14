@@ -24,8 +24,6 @@ import { ActivityCreatedEventPayload } from '../activity/activity.types';
 import { LeaderboardService } from '../leaderboards/leaderboard.service';
 import { GoalService } from '../goals/goal.service';
 import { ContestService } from '../contests/contest.service';
-import { LootService } from '../loot/loot.service';
-import { LootCategory } from '../loot/loot.types';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -49,7 +47,6 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
     private readonly leaderboard?: LeaderboardService,
     private readonly goalService?: GoalService,
     private readonly contestService?: ContestService,
-    private readonly lootService?: LootService,
   ) {
     this.client = new Client({
       intents: [GatewayIntentBits.Guilds],
@@ -1328,74 +1325,6 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       } else {
         await interaction.reply({ content: '❌ Unknown goal subcommand.', flags: 64 });
       }
-    } else if (commandName === 'inventory') {
-      if (!this.lootService) {
-        await interaction.reply({ content: '⚠️ Armory & Loot service is currently unavailable.', flags: 64 });
-        return;
-      }
-      await interaction.deferReply();
-      const targetUser = interaction.options.getUser('user') || interaction.user;
-      const rawCat = interaction.options.getString('category');
-      const categoryFilter: LootCategory | undefined =
-        rawCat && rawCat !== 'ALL' ? (rawCat as LootCategory) : undefined;
-
-      try {
-        const inv = await this.withTimeout(
-          this.lootService.getUserInventory(targetUser.id, categoryFilter),
-          this.externalOperationTimeoutMs,
-          'Fetching inventory',
-        );
-        const embed = DiscordEmbeds.createInventoryEmbed(inv, categoryFilter);
-        await interaction.editReply({ embeds: [embed] });
-      } catch (err: any) {
-        await interaction.editReply({
-          content: `❌ ${err.message || 'Could not load inventory. Make sure your account is linked via `/link`.'}`,
-        });
-      }
-    } else if (commandName === 'drop') {
-      if (!this.lootService) {
-        await interaction.reply({ content: '⚠️ Loot service is currently unavailable.', flags: 64 });
-        return;
-      }
-      await interaction.deferReply();
-      const user = await this.prisma.user.findUnique({
-        where: { discordId: interaction.user.id },
-      });
-      if (!user) {
-        await interaction.editReply({
-          content: '❌ Please link your LeetCode account first with `/link <username>` to unbox Loot Crates!',
-        });
-        return;
-      }
-
-      // Check 6-hour cooldown on manual /drop crate claims
-      const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
-      const recentClaim = await this.prisma.userLootDrop.findFirst({
-        where: {
-          userId: user.id,
-          source: '🎁 Daily Free Command Crate',
-          updatedAt: { gte: sixHoursAgo },
-        },
-        orderBy: { updatedAt: 'desc' },
-      });
-
-      if (recentClaim) {
-        const nextReadyUnix = Math.floor((recentClaim.updatedAt.getTime() + 6 * 60 * 60 * 1000) / 1000);
-        await interaction.editReply({
-          content:
-            `⏳ **Supply Crate Recharging!** Your next free \`/drop\` crate will be ready <t:${nextReadyUnix}:R> (<t:${nextReadyUnix}:t>).\n` +
-            `💡 *Pro Tip: Solve problems on LeetCode, hit Streak Milestones, or complete \`/goal\` targets to earn instant bonus crates!*`,
-        });
-        return;
-      }
-
-      const drop = await this.lootService.rollAndGrantDrop(
-        user.id,
-        'STANDARD_CRATE',
-        '🎁 Daily Free Command Crate',
-      );
-      const embed = DiscordEmbeds.createLootDropEmbed(user.username, drop);
-      await interaction.editReply({ embeds: [embed] });
     } else {
       await interaction.reply({ content: `Command \`/${commandName}\` acknowledged!`, flags: 64 });
     }
@@ -1440,7 +1369,6 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
       }
 
       // Check if submission falls in active contest and record boss raid damage
-      let isContestRaidHit = false;
       if (this.contestService) {
         for (const membership of user.guildMemberships) {
           try {
@@ -1451,7 +1379,6 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
               new Date(event.submissionTimestamp || Date.now()),
             );
             if (raidResult) {
-              isContestRaidHit = true;
               this.logger.log(
                 `Contest raid strike: ${user.username} dealt ${raidResult.damageDealt} DMG to ${raidResult.bossBattle.bossName}`,
               );
@@ -1462,40 +1389,11 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      // Roll & grant Loot Crate drop (Goal Completion Crate, Contest Raid Chest, Streak Chest, or Solve Drop)
-      let lootDrop: any = null;
-      if (this.lootService) {
-        try {
-          if (goalProgressSummary && goalProgressSummary.current === goalProgressSummary.target) {
-            lootDrop = await this.lootService.grantGoalCompletionDrop(
-              user.id,
-              goalProgressSummary.period === 'Weekly' ? 'WEEK' : 'DAY',
-              goalProgressSummary.target,
-            );
-          } else {
-            lootDrop = await this.lootService.evaluateSolveLootDrop({
-              userId: user.id,
-              difficulty: event.difficulty,
-              currentStreak: user.currentStreak,
-              isContestRaidHit,
-            });
-          }
-        } catch (lErr: any) {
-          this.logger.warn(`Failed to evaluate loot drop for ${user.username}: ${lErr.message}`);
-        }
-      }
-
       for (const membership of user.guildMemberships) {
         const notifConfig = membership.guild.notificationConfig;
         if (notifConfig && notifConfig.enableActivityAlerts && notifConfig.activityChannelId) {
           try {
-            const embed = DiscordEmbeds.createSolveAlertEmbed(
-              user,
-              event,
-              event.xpAwarded,
-              goalProgressSummary,
-              lootDrop,
-            );
+            const embed = DiscordEmbeds.createSolveAlertEmbed(user, event, event.xpAwarded, goalProgressSummary);
             const { mention, roleId } = await this.getDevRoleMention(membership.guild.discordGuildId);
 
             const delivered = await this.sendMessageToChannel(notifConfig.activityChannelId, {
